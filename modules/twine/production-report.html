@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Twine Production Report</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){ try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme") || "navy"); }catch(e){} })();
+  window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme){ document.documentElement.setAttribute("data-theme", e.data.rumbuTheme); } });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  body{padding:20px;}
+  .wrap{max-width:1200px;margin:0 auto;}
+  #connStatus{font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);}
+  .summary-bar{display:none;gap:18px;flex-wrap:wrap;margin:14px 0;padding:12px 14px;background:var(--bg);border-radius:var(--radius-sm);font-size:13px;}
+  .summary-bar b{color:var(--heading);}
+  @media print{ .no-print{display:none !important;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+<button class="no-print" onclick="(window.parent&&window.parent.closeModule)?window.parent.closeModule():(window.location.href='../../index.html')" style="max-width:220px;margin-bottom:12px;background:var(--accent);color:var(--logo-fg);">&larr; Back to Dashboard</button>
+<div id="connStatus">Loading...</div>
+
+<div class="card-panel no-print">
+  <h3>Twine Production Report</h3>
+  <div class="filters">
+    <div class="f"><label>From Date</label><input type="date" id="fStart"></div>
+    <div class="f"><label>To Date</label><input type="date" id="fEnd"></div>
+    <div class="f"><label>Shift</label><select id="fShift"><option value="">All</option><option>Morning</option><option>Night</option></select></div>
+    <div class="f"><label>Section</label><select id="fSection"><option value="">All</option><option value="Rumbu">Rumbu</option><option value="MamaSannu">MamaSannu</option></select></div>
+    <div class="f"><label>Operator</label><select id="fOperatorSelect"><option value="">All (from list)</option></select></div>
+    <div class="f"><label>Asset</label><select id="fAsset"><option value="">All</option></select></div>
+    <div class="f"><label>Twine Type</label><select id="fType"><option value="">All</option></select></div>
+    <div class="f f-min"><button onclick="fetchReport()">Fetch Report</button></div>
+    <div class="f f-min"><button class="btn-ghost" onclick="clearFilters()">Clear</button></div>
+    <div class="f f-min"><button class="btn-ghost" onclick="window.print()">Print / Save as PDF</button></div>
+  </div>
+</div>
+
+<div class="summary-bar" id="summaryBar"></div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table id="reportTable">
+      <thead><tr><th>Date</th><th>Shift</th><th>Type</th><th>Asset</th><th>Operator</th><th>Section</th><th>Bags</th><th>Remainder</th><th>Target</th></tr></thead>
+      <tbody id="reportBody"><tr><td colspan="9">Select a date range and click Fetch Report.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<div class="status" id="status" style="display:none;"></div>
+
+</div>
+
+<script>
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    const me = await requireAuth("../../login.html");
+    if(!me) return;
+
+    const { data: assets } = await sb.from("twine_assets").select("asset_code").order("asset_code");
+    document.getElementById("fAsset").innerHTML = '<option value="">All</option>' + (assets||[]).map(a=>`<option>${a.asset_code}</option>`).join("");
+
+    const { data: types } = await sb.from("twine_types").select("type_code").order("type_code");
+    document.getElementById("fType").innerHTML = '<option value="">All</option>' + (types||[]).map(t=>`<option>${t.type_code}</option>`).join("");
+
+    const { data: operators } = await sb.from("employees").select("employee_id, full_name")
+      .eq("department", "Production").eq("unit", "Twine").order("full_name");
+    document.getElementById("fOperatorSelect").innerHTML = '<option value="">All (from list)</option>' +
+      (operators||[]).map(o=>`<option value="${o.employee_id}">${o.full_name} (${o.employee_id})</option>`).join("");
+
+    status.style.color = "var(--ok)"; status.textContent = "Connected.";
+  }catch(e){
+    status.style.color = "var(--bad)"; status.textContent = "Could not load: " + e.message;
+  }
+}
+
+async function fetchReport(){
+  const from = document.getElementById("fStart").value;
+  const to = document.getElementById("fEnd").value;
+  const shift = document.getElementById("fShift").value;
+  const section = document.getElementById("fSection").value;
+  const operatorFromList = document.getElementById("fOperatorSelect").value;
+  const asset = document.getElementById("fAsset").value;
+  const type = document.getElementById("fType").value;
+  const statusEl = document.getElementById("status");
+  const body = document.getElementById("reportBody");
+  const bar = document.getElementById("summaryBar");
+
+  if(!from && !to){
+    statusEl.style.display = "block"; statusEl.className = "status err";
+    statusEl.textContent = "Select a From Date and/or To Date, then click Fetch Report.";
+    return;
+  }
+  statusEl.style.display = "none";
+
+  let query = sb.from("twine_production").select("*").order("production_date",{ascending:false}).order("shift").limit(1000);
+  if(from) query = query.gte("production_date", from);
+  if(to) query = query.lte("production_date", to);
+  if(shift) query = query.eq("shift", shift);
+  if(section) query = query.eq("section", section);
+  if(asset) query = query.eq("asset_code", asset);
+  if(type) query = query.eq("twine_type", type);
+  if(operatorFromList) query = query.eq("operator_id", operatorFromList);
+
+  const { data, error } = await query;
+  if(error){ body.innerHTML = `<tr><td colspan="9">Error: ${error.message}</td></tr>`; return; }
+  const rows = data || [];
+  if(!rows.length){
+    body.innerHTML = `<tr><td colspan="9">No records match the selected filters.</td></tr>`;
+    bar.style.display = "none";
+    return;
+  }
+  let totalBags = 0, totalRem = 0;
+  body.innerHTML = rows.map(r=>{
+    totalBags += r.bags; totalRem += r.remainder;
+    return `<tr><td>${r.production_date}</td><td>${r.shift}</td><td>${r.twine_type}</td><td>${r.asset_code}</td><td>${r.operator_name}</td><td>${r.section}</td><td>${r.bags}</td><td>${r.remainder}</td><td>${r.target}</td></tr>`;
+  }).join("");
+  bar.style.display = "flex";
+  bar.innerHTML = `<span>Records: <b>${rows.length}</b></span><span>Total Bags: <b>${totalBags}</b></span><span>Total Remainder: <b>${totalRem}</b></span>`;
+}
+
+function clearFilters(){
+  document.getElementById("fStart").value = "";
+  document.getElementById("fEnd").value = "";
+  document.getElementById("fShift").value = "";
+  document.getElementById("fSection").value = "";
+  document.getElementById("fOperatorSelect").value = "";
+  document.getElementById("fAsset").value = "";
+  document.getElementById("fType").value = "";
+  document.getElementById("reportBody").innerHTML = `<tr><td colspan="9">Select a date range and click Fetch Report.</td></tr>`;
+  document.getElementById("summaryBar").style.display = "none";
+}
+
+init();
+</script>
+</body>
+</html>

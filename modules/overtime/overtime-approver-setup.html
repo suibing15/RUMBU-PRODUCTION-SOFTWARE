@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overtime — Approver Setup</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    function apply(t){ if(t) document.documentElement.setAttribute("data-theme", t); }
+    window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme) apply(e.data.rumbuTheme); });
+    try{ apply(localStorage.getItem("rumbu_theme")); }catch(e){}
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  :root{--navy:var(--heading);--blue:var(--accent);--blue-dark:var(--accent-2);--muted:#6b7280;--red:#c0392b;--green:#1d8a4e;}
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:var(--bg);margin:0;padding:18px;color:var(--text);}
+  .wrap{max-width:950px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h3{color:var(--navy);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--blue);font-size:12px;margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:10px 0 4px;}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > div{flex:1;min-width:180px;}
+  button{padding:11px 16px;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;background:var(--blue);color:#fff;margin-top:14px;}
+  button:hover{background:var(--blue-dark);}
+  button:disabled{opacity:.6;cursor:not-allowed;}
+  .status{margin-top:10px;font-weight:bold;font-size:13px;min-height:16px;}
+  .status.ok{color:var(--green);} .status.err{color:var(--red);}
+  #connStatus{font-size:12px;font-weight:bold;text-align:center;margin-bottom:10px;}
+  .picker{border:1px solid var(--line);border-radius:8px;padding:10px;max-height:220px;overflow-y:auto;margin-top:6px;background:var(--bg);}
+  .picker label{display:flex;align-items:center;gap:8px;font-weight:normal;font-size:13px;margin:0;padding:6px 4px;cursor:pointer;}
+  .picker label:hover{background:var(--card);border-radius:6px;}
+  .picker input[type=checkbox]{width:auto;}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:5px 6px 5px 12px;margin:3px 4px 0 0;font-size:12px;}
+  .chip button{margin:0;padding:0;width:18px;height:18px;line-height:16px;border-radius:50%;background:var(--red);font-size:12px;font-weight:bold;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  thead th{background:var(--navy);color:#fff;font-size:12px;}
+  tbody tr:nth-child(even){background:#f6f8fb;}
+  .noaccess{color:var(--red);font-weight:bold;text-align:center;padding:30px;}
+  .tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .tab-btn{background:var(--bg);color:var(--text);border:1px solid var(--line);padding:8px 14px;border-radius:20px;font-size:13px;font-weight:bold;cursor:pointer;margin:0;}
+  .tab-btn.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div id="appArea" style="display:none;">
+
+<div class="card">
+  <div class="tabs">
+    <button class="tab-btn active" id="tabbtn-initiators" onclick="switchTab('initiators')">Initiators</button>
+    <button class="tab-btn" id="tabbtn-step2" onclick="switchTab('step2')">Step 2 Fillers</button>
+    <button class="tab-btn" id="tabbtn-step35" onclick="switchTab('step35')">Step 3 / Step 5 Approvers</button>
+    <button class="tab-btn" id="tabbtn-step6" onclick="switchTab('step6')">Step 6 — ED1 Approvers</button>
+  </div>
+
+  <!-- ================= INITIATORS (per Section) ================= -->
+  <div class="tab-panel active" id="panel-initiators">
+    <h3>Assign Initiators</h3>
+    <p class="sub">Who is allowed to initiate a new overtime request for a given Branch.</p>
+
+    <div class="row">
+      <div><label>Section (Branch)</label><select id="init_section"></select></div>
+    </div>
+
+    <label>Initiators (select one or more employees)</label>
+    <input type="text" id="init_search" placeholder="Search employees by name or ID" oninput="renderInitPicker()">
+    <div class="picker" id="init_picker"></div>
+    <div id="init_selected"></div>
+
+    <button onclick="saveInitiators()">Save Initiators</button>
+    <div class="status" id="init_status"></div>
+  </div>
+
+  <div class="tab-panel" id="panel-step2">
+    <h3>Assign Step 2 Fillers</h3>
+    <p class="sub">Who is allowed to add employees to an overtime request, for a given Branch + Department.</p>
+
+    <div class="row">
+      <div><label>Section (Branch)</label><select id="s2_section" onchange="onS2SectionChanged()"></select></div>
+      <div><label>Department</label><select id="s2_department"></select></div>
+    </div>
+
+    <label>Fillers (select one or more employees)</label>
+    <input type="text" id="s2_search" placeholder="Search employees by name or ID" oninput="renderS2Picker()">
+    <div class="picker" id="s2_picker"></div>
+    <div id="s2_selected"></div>
+
+    <button onclick="saveStep2Fillers()">Save Step 2 Fillers</button>
+    <div class="status" id="s2_status"></div>
+  </div>
+
+  <!-- ================= STEP 3 / STEP 5 APPROVERS (per Section) ================= -->
+  <div class="tab-panel" id="panel-step35">
+    <h3>Assign Step 3 / Step 5 Approvers</h3>
+    <p class="sub">These approvers oversee every Department within the Branch they're assigned to. ALL assigned approvers must approve before a case advances.</p>
+
+    <div class="row">
+      <div><label>Section (Branch)</label><select id="s35_section"></select></div>
+      <div><label>Step</label>
+        <select id="s35_step">
+          <option value="3">Step 3 — First Approval</option>
+          <option value="5">Step 5 — Disbursement Approval</option>
+        </select>
+      </div>
+    </div>
+
+    <label>Approvers (select one or more employees)</label>
+    <input type="text" id="s35_search" placeholder="Search employees by name or ID" oninput="renderS35Picker()">
+    <div class="picker" id="s35_picker"></div>
+    <div id="s35_selected"></div>
+
+    <button onclick="saveStep35Approvers()">Save Approvers</button>
+    <div class="status" id="s35_status"></div>
+  </div>
+
+  <!-- ================= STEP 6 — ED1 (shared, ALL_BRANCHES) ================= -->
+  <div class="tab-panel" id="panel-step6">
+    <h3>Assign Step 6 — ED1 Approvers</h3>
+    <p class="sub">One shared team, reviewing overtime cases from every Branch (filterable by Branch at their own screen).</p>
+
+    <label>Approvers (select one or more employees)</label>
+    <input type="text" id="s6_search" placeholder="Search employees by name or ID" oninput="renderS6Picker()">
+    <div class="picker" id="s6_picker"></div>
+    <div id="s6_selected"></div>
+
+    <button onclick="saveStep6Approvers()">Save ED1 Approvers</button>
+    <div class="status" id="s6_status"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Current Assignments</h3>
+  <div id="assignmentsWrap"></div>
+</div>
+
+</div>
+
+<div id="noAccess" class="noaccess" style="display:none;">
+  You do not have permission to manage overtime approvers. Only Admins and Super Admins can.
+</div>
+</div>
+
+<script>
+let ME = null;
+let EMPLOYEES = [];
+let S2_SELECTED = new Set();
+let S35_SELECTED = new Set();
+let S6_SELECTED = new Set();
+let INIT_SELECTED = new Set();
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){ console.warn("Activity log write failed (non-fatal):", e); }
+}
+
+function switchTab(name){
+  ["initiators","step2","step35","step6"].forEach(t=>{
+    document.getElementById("panel-"+t).classList.toggle("active", t===name);
+    document.getElementById("tabbtn-"+t).classList.toggle("active", t===name);
+  });
+}
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    if(ME.role !== "super_admin" && ME.role !== "admin"){
+      status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+      document.getElementById("noAccess").style.display = "block";
+      return;
+    }
+
+    document.getElementById("appArea").style.display = "block";
+    populateSections();
+    await loadEmployees();
+    await loadAssignments();
+
+    status.style.color = "#1d8a4e";
+    status.textContent = "Connected.";
+  }catch(e){
+    status.style.color = "#c0392b";
+    status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+function populateSections(){
+  const fill = (sel)=>{
+    sel.innerHTML = "";
+    if(ME.role === "super_admin"){
+      sb.from("app_sections").select("name").order("name").then(({data})=>{
+        (data || []).forEach(s=>{
+          const o = document.createElement("option");
+          o.value = s.name; o.textContent = s.name;
+          sel.appendChild(o);
+        });
+        if(sel.id === "s2_section") onS2SectionChanged();
+      });
+      sel.disabled = false;
+      return;
+    }
+    const mine = ME.sectionNames || [];
+    if(!mine.length){
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "— no branch assigned —";
+      sel.appendChild(o);
+      sel.disabled = true;
+      return;
+    }
+    mine.forEach(name=>{
+      const o = document.createElement("option");
+      o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    });
+    sel.disabled = (mine.length === 1);
+    if(sel.id === "s2_section") onS2SectionChanged();
+  };
+  fill(document.getElementById("init_section"));
+  fill(document.getElementById("s2_section"));
+  fill(document.getElementById("s35_section"));
+}
+
+// Loads REAL organizational departments for the selected Section, from
+// the departments table — NOT modules (that's a separate concept: software
+// feature categories, managed in Manage Accounts).
+async function onS2SectionChanged(){
+  const deptSel = document.getElementById("s2_department");
+  const section = document.getElementById("s2_section").value;
+  if(!section){ deptSel.innerHTML = "<option value=''>Select a Section first</option>"; return; }
+  const { data, error } = await sb.from("departments").select("name").eq("section", section).order("name");
+  if(error){ deptSel.innerHTML = "<option value=''>Could not load</option>"; return; }
+  if(!data || !data.length){ deptSel.innerHTML = "<option value=''>No departments set up for this Branch</option>"; return; }
+  deptSel.innerHTML = (data||[]).map(d => `<option value="${d.name}">${d.name}</option>`).join("");
+}
+
+async function loadEmployees(){
+  const { data, error } = await sb.from("employees").select("id, employee_id, full_name, department, branch").order("full_name");
+  if(error){ console.warn("Could not load employees:", error.message); return; }
+  EMPLOYEES = data || [];
+}
+
+// ─────────────────────────────────────────────────────────
+// Generic search-only picker (mirrors the Gatepass Type pattern)
+// ─────────────────────────────────────────────────────────
+function renderGenericPicker(searchId, wrapId, selectedSet){
+  const wrap = document.getElementById(wrapId);
+  const q = document.getElementById(searchId).value.trim().toLowerCase();
+  if(!q){ wrap.innerHTML = "<p class='sub'>Type a name or ID above to find employees.</p>"; return; }
+
+  const rows = EMPLOYEES.filter(e=>{
+    const hay = (e.full_name + " " + e.employee_id).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  });
+  if(!rows.length){ wrap.innerHTML = "<p class='sub'>No employees match.</p>"; return; }
+
+  wrap.innerHTML = rows.map(e=>{
+    const checked = selectedSet.has(e.id) ? "checked" : "";
+    return `<label><input type="checkbox" value="${e.id}" ${checked} onchange="toggleGeneric(${e.id}, this.checked, '${wrapId}')">` +
+      `${e.full_name} <span style="color:var(--muted);">(${e.employee_id}${e.department ? " · " + e.department : ""})</span></label>`;
+  }).join("");
+}
+
+function renderGenericSelected(wrapId, selectedListId, selectedSet){
+  const wrap = document.getElementById(selectedListId);
+  if(!selectedSet.size){ wrap.innerHTML = ""; return; }
+  const chips = Array.from(selectedSet).map(id=>{
+    const e = EMPLOYEES.find(emp => emp.id === id);
+    const label = e ? (e.full_name + " (" + e.employee_id + ")") : ("#" + id);
+    return `<span class="chip">${label}<button onclick="removeGeneric(${id}, '${wrapId}', '${selectedListId}')" title="Remove">&times;</button></span>`;
+  }).join("");
+  wrap.innerHTML = "<label>Selected</label>" + chips;
+}
+
+function pickerContext(wrapId){
+  if(wrapId === "init_picker") return { set: INIT_SELECTED, selId: "init_selected" };
+  if(wrapId === "s2_picker") return { set: S2_SELECTED, selId: "s2_selected" };
+  if(wrapId === "s35_picker") return { set: S35_SELECTED, selId: "s35_selected" };
+  return { set: S6_SELECTED, selId: "s6_selected" };
+}
+
+function toggleGeneric(id, checked, wrapId){
+  const ctx = pickerContext(wrapId);
+  if(checked) ctx.set.add(id); else ctx.set.delete(id);
+  renderGenericSelected(wrapId, ctx.selId, ctx.set);
+}
+
+function removeGeneric(id, wrapId, selectedListId){
+  const ctx = pickerContext(wrapId);
+  ctx.set.delete(id);
+  const box = document.querySelector('#' + wrapId + ' input[value="' + id + '"]');
+  if(box) box.checked = false;
+  renderGenericSelected(wrapId, selectedListId, ctx.set);
+}
+
+function renderS2Picker(){ renderGenericPicker("s2_search", "s2_picker", S2_SELECTED); }
+function renderS35Picker(){ renderGenericPicker("s35_search", "s35_picker", S35_SELECTED); }
+function renderS6Picker(){ renderGenericPicker("s6_search", "s6_picker", S6_SELECTED); }
+function renderInitPicker(){ renderGenericPicker("init_search", "init_picker", INIT_SELECTED); }
+
+async function saveInitiators(){
+  const status = document.getElementById("init_status");
+  const section = document.getElementById("init_section").value;
+
+  if(!section){ status.className="status err"; status.textContent="Select a Section."; return; }
+  if(!INIT_SELECTED.size){ status.className="status err"; status.textContent="Select at least one initiator."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const rows = Array.from(INIT_SELECTED).map(empId => ({ section, employee_id: empId }));
+    const { error } = await sb.from("overtime_initiators").insert(rows);
+    if(error) throw error;
+
+    await logActivity("overtime_initiator_assigned", ME.username + " assigned " + rows.length + " initiator(s) for " + section);
+    status.className = "status ok"; status.textContent = "✅ Saved.";
+
+    INIT_SELECTED.clear();
+    renderInitPicker(); renderGenericSelected("init_picker","init_selected",INIT_SELECTED);
+    await loadAssignments();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ One or more of these is already an initiator there." : "❌ " + e.message;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// SAVE actions
+// ─────────────────────────────────────────────────────────
+async function saveStep2Fillers(){
+  const status = document.getElementById("s2_status");
+  const section = document.getElementById("s2_section").value;
+  const department = document.getElementById("s2_department").value;
+
+  if(!section || !department){ status.className="status err"; status.textContent="Select a Section and Department."; return; }
+  if(!S2_SELECTED.size){ status.className="status err"; status.textContent="Select at least one filler."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const rows = Array.from(S2_SELECTED).map(empId => ({ section, department, employee_id: empId }));
+    const { error } = await sb.from("overtime_step2_fillers").insert(rows);
+    if(error) throw error;
+
+    await logActivity("overtime_step2_filler_assigned", ME.username + " assigned " + rows.length + " Step 2 filler(s) for " + section + " / " + department);
+    status.className = "status ok"; status.textContent = "✅ Saved.";
+
+    S2_SELECTED.clear();
+    renderS2Picker(); renderGenericSelected("s2_picker","s2_selected",S2_SELECTED);
+    await loadAssignments();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ One or more of these is already assigned there." : "❌ " + e.message;
+  }
+}
+
+async function saveStep35Approvers(){
+  const status = document.getElementById("s35_status");
+  const section = document.getElementById("s35_section").value;
+  const step = Number(document.getElementById("s35_step").value);
+
+  if(!section){ status.className="status err"; status.textContent="Select a Section."; return; }
+  if(!S35_SELECTED.size){ status.className="status err"; status.textContent="Select at least one approver."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const rows = Array.from(S35_SELECTED).map(empId => ({ section, step, employee_id: empId }));
+    const { error } = await sb.from("overtime_step_approvers").insert(rows);
+    if(error) throw error;
+
+    await logActivity("overtime_step_approver_assigned", ME.username + " assigned " + rows.length + " Step " + step + " approver(s) for " + section);
+    status.className = "status ok"; status.textContent = "✅ Saved.";
+
+    S35_SELECTED.clear();
+    renderS35Picker(); renderGenericSelected("s35_picker","s35_selected",S35_SELECTED);
+    await loadAssignments();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ One or more of these is already assigned there." : "❌ " + e.message;
+  }
+}
+
+async function saveStep6Approvers(){
+  const status = document.getElementById("s6_status");
+  if(!S6_SELECTED.size){ status.className="status err"; status.textContent="Select at least one approver."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const rows = Array.from(S6_SELECTED).map(empId => ({ section: "ALL_BRANCHES", step: 6, employee_id: empId }));
+    const { error } = await sb.from("overtime_step_approvers").insert(rows);
+    if(error) throw error;
+
+    await logActivity("overtime_step6_approver_assigned", ME.username + " assigned " + rows.length + " ED1 approver(s)");
+    status.className = "status ok"; status.textContent = "✅ Saved.";
+
+    S6_SELECTED.clear();
+    renderS6Picker(); renderGenericSelected("s6_picker","s6_selected",S6_SELECTED);
+    await loadAssignments();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ One or more of these is already an ED1 approver." : "❌ " + e.message;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// Current assignments overview
+// ─────────────────────────────────────────────────────────
+async function loadAssignments(){
+  const wrap = document.getElementById("assignmentsWrap");
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  const [{ data: initiators }, { data: fillers }, { data: approvers }] = await Promise.all([
+    sb.from("overtime_initiators").select("section, employee_id").order("section"),
+    sb.from("overtime_step2_fillers").select("section, department, employee_id").order("section"),
+    sb.from("overtime_step_approvers").select("section, step, employee_id").order("section").order("step")
+  ]);
+
+  const empIds = [...new Set([
+    ...(initiators||[]).map(i=>i.employee_id),
+    ...(fillers||[]).map(f=>f.employee_id),
+    ...(approvers||[]).map(a=>a.employee_id)
+  ])];
+  let nameMap = {};
+  if(empIds.length){
+    const { data: emps } = await sb.from("employees").select("id, full_name").in("id", empIds);
+    (emps||[]).forEach(e=>{ nameMap[e.id] = e.full_name; });
+  }
+
+  let html = "<table><thead><tr><th>Scope</th><th>Role</th><th>Approvers / Fillers</th></tr></thead><tbody>";
+
+  let byInit = {};
+  (initiators||[]).forEach(i=>{
+    if(!byInit[i.section]) byInit[i.section] = [];
+    byInit[i.section].push(nameMap[i.employee_id] || "?");
+  });
+  Object.keys(byInit).forEach(section=>{
+    html += "<tr><td>" + section + "</td><td>Initiator</td><td>" + byInit[section].join(", ") + "</td></tr>";
+  });
+
+  let byS2 = {};
+  (fillers||[]).forEach(f=>{
+    const key = f.section + " / " + f.department;
+    if(!byS2[key]) byS2[key] = [];
+    byS2[key].push(nameMap[f.employee_id] || "?");
+  });
+  Object.keys(byS2).forEach(key=>{
+    html += "<tr><td>" + key + "</td><td>Step 2 Filler</td><td>" + byS2[key].join(", ") + "</td></tr>";
+  });
+
+  let byStep = {};
+  (approvers||[]).forEach(a=>{
+    const scopeLabel = a.section === "ALL_BRANCHES" ? "ED1 (all branches)" : a.section;
+    const key = scopeLabel + "||" + a.step;
+    if(!byStep[key]) byStep[key] = [];
+    byStep[key].push(nameMap[a.employee_id] || "?");
+  });
+  Object.keys(byStep).forEach(key=>{
+    const [scopeLabel, step] = key.split("||");
+    const stepLabel = step === "6" ? "Step 6 — ED1" : (step === "3" ? "Step 3 — First Approval" : "Step 5 — Disbursement");
+    html += "<tr><td>" + scopeLabel + "</td><td>" + stepLabel + "</td><td>" + byStep[key].join(", ") + "</td></tr>";
+  });
+
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overtime — Fill</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    function apply(t){ if(t) document.documentElement.setAttribute("data-theme", t); }
+    window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme) apply(e.data.rumbuTheme); });
+    try{ apply(localStorage.getItem("rumbu_theme")); }catch(e){}
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  :root{--navy:var(--heading);--blue:var(--accent);--blue-dark:var(--accent-2);--muted:#6b7280;--red:#c0392b;--green:#1d8a4e;--amber:#d97706;}
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:var(--bg);margin:0;padding:18px;color:var(--text);}
+  .wrap{max-width:1050px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h3{color:var(--navy);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--blue);font-size:12px;margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:10px 0 4px;}
+  input,select,textarea{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  textarea{resize:vertical;min-height:60px;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > div{flex:1;min-width:160px;}
+  button{padding:10px 14px;border:none;border-radius:8px;font-weight:bold;font-size:13px;cursor:pointer;background:var(--blue);color:#fff;margin-top:10px;}
+  button:hover{background:var(--blue-dark);}
+  button.mini{padding:6px 10px;font-size:12px;margin-top:0;}
+  button.green{background:var(--green);} button.green:hover{background:#166a2c;}
+  button.red{background:var(--red);} button.red:hover{background:#96242e;}
+  .status{margin-top:10px;font-weight:bold;font-size:13px;min-height:16px;}
+  .status.ok{color:var(--green);} .status.err{color:var(--red);}
+  #connStatus{font-size:12px;font-weight:bold;text-align:center;margin-bottom:10px;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  thead th{background:var(--navy);color:#fff;font-size:12px;}
+  tbody tr:nth-child(even){background:#f6f8fb;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;color:#fff;}
+  .tag.new{background:var(--amber);}
+  .tag.rejected{background:var(--red);}
+  .noaccess{color:var(--red);font-weight:bold;text-align:center;padding:30px;}
+  .rejbox{background:#fdecea;border:1px solid var(--red);border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#7a1f1f;font-size:13px;}
+  .infobox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;}
+  .found-name{font-weight:bold;color:var(--green);}
+  .not-found{font-weight:bold;color:var(--red);}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div id="appArea" style="display:none;">
+
+<div class="card">
+  <h3>Fill Overtime — Step 2</h3>
+  <p class="sub" id="scopeNote"></p>
+  <div class="row">
+    <div><label>Scope</label><select id="scopeFilter" onchange="loadQueue()"><option value="all">All my assigned scopes</option></select></div>
+    <div style="flex:0 0 auto;align-self:flex-end;"><button class="mini" onclick="loadQueue()">Refresh</button></div>
+  </div>
+  <div id="queueWrap"></div>
+</div>
+
+<div class="card" id="workCard" style="display:none;">
+  <h3 id="workTitle">Working on entry</h3>
+  <div id="rejBanner"></div>
+  <div id="entryInfo"></div>
+
+  <div id="employeesListWrap"></div>
+
+  <h4 style="color:var(--navy);margin:16px 0 4px;">Add an Employee</h4>
+  <div class="row">
+    <div>
+      <label>ID</label>
+      <input type="text" id="empIdInput" placeholder="Type employee ID" oninput="lookupEmployee()">
+    </div>
+    <div>
+      <label>Name of Employee</label>
+      <input type="text" id="empNameDisplay" disabled>
+    </div>
+  </div>
+  <label>Reason for Overtime</label>
+  <textarea id="reasonInput" placeholder="Why this employee is doing overtime"></textarea>
+  <button onclick="addEmployeeToEntry()">Add Employee</button>
+  <div class="status" id="addStatus"></div>
+
+  <div id="responseNoteWrap" style="display:none;">
+    <label>Response to Rejection <span style="color:var(--red);">*</span></label>
+    <textarea id="responseNoteInput" placeholder="Explain what was corrected before resubmitting"></textarea>
+  </div>
+
+  <div style="margin-top:18px;">
+    <button class="green" onclick="submitEntry()">Submit for Approval</button>
+    <button class="mini" style="background:#6b7280;" onclick="closeWorkCard()">Close</button>
+  </div>
+  <div class="status" id="submitStatus"></div>
+</div>
+
+<div class="card">
+  <h3>My Submission History</h3>
+  <div class="row">
+    <div><label>From Date</label><input type="date" id="fromDate"></div>
+    <div><label>To Date</label><input type="date" id="toDate"></div>
+    <div style="flex:0 0 auto;align-self:flex-end;"><button class="mini" onclick="loadHistory()">Refresh</button></div>
+  </div>
+  <div id="historyWrap"></div>
+</div>
+
+</div>
+
+<div id="noAccess" class="noaccess" style="display:none;">
+  You are not assigned as a Step 2 filler for any Branch/Department. Ask your Super Admin to assign you in Overtime Approver Setup.
+</div>
+</div>
+
+<script>
+let ME = null;
+let MY_SCOPES = [];       // [{section, department}, ...]
+let IS_SUPER_ADMIN_BLANKET = false;
+let EMPLOYEES = [];
+let CURRENT_ENTRY = null; // the entry currently being worked on
+let CURRENT_EMPLOYEES = [];
+let ALL_HISTORY = [];
+const COMPANY = "Rumbu Industries Limited";
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){ console.warn("Activity log write failed (non-fatal):", e); }
+}
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    await loadEmployees();
+    await loadMyScopes();
+
+    if(!MY_SCOPES.length && !IS_SUPER_ADMIN_BLANKET){
+      status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+      document.getElementById("noAccess").style.display = "block";
+      return;
+    }
+
+    document.getElementById("appArea").style.display = "block";
+    document.getElementById("scopeNote").textContent = IS_SUPER_ADMIN_BLANKET
+      ? "Super Admin — showing every Branch/Department."
+      : "Showing your assigned scope(s): " + MY_SCOPES.map(s=>s.section+" / "+s.department).join(", ");
+
+    populateScopeFilter();
+    status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+    await loadQueue();
+    await loadHistory();
+  }catch(e){
+    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+async function loadEmployees(){
+  const { data } = await sb.from("employees").select("id, employee_id, full_name, department, branch");
+  EMPLOYEES = data || [];
+}
+
+// Finds who the logged-in account is (via employees.linked_profile_id),
+// then which Section+Department scopes they've been assigned as a Step 2
+// filler. Super Admin gets a blanket override so nothing is ever stuck
+// with zero access.
+async function loadMyScopes(){
+  MY_SCOPES = [];
+  if(ME.role === "super_admin"){ IS_SUPER_ADMIN_BLANKET = true; return; }
+
+  const { data: emp } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
+  if(!emp) return;
+  const { data: scopes } = await sb.from("overtime_step2_fillers").select("section, department").eq("employee_id", emp.id);
+  MY_SCOPES = scopes || [];
+}
+
+function populateScopeFilter(){
+  const sel = document.getElementById("scopeFilter");
+  sel.innerHTML = '<option value="all">All my assigned scopes</option>' +
+    MY_SCOPES.map(s => `<option value="${s.section}||${s.department}">${s.section} / ${s.department}</option>`).join("");
+}
+
+// ─────────────────────────────────────────────────────────
+// QUEUE — pending entries awaiting Step 2 in my scope(s)
+// ─────────────────────────────────────────────────────────
+async function loadQueue(){
+  const wrap = document.getElementById("queueWrap");
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    let q = sb.from("overtime_department_entries").select("*, overtime_initiations(form_number, overtime_date, propose_hours)")
+      .in("status", ["awaiting_step2","rejected_to_step2"])
+      .order("created_at", { ascending: false });
+
+    if(!IS_SUPER_ADMIN_BLANKET){
+      const scopeFilter = document.getElementById("scopeFilter").value;
+      if(scopeFilter !== "all"){
+        const [sec, dept] = scopeFilter.split("||");
+        q = q.eq("section", sec).eq("department", dept);
+      } else if(MY_SCOPES.length){
+        const secList = [...new Set(MY_SCOPES.map(s=>s.section))];
+        q = q.in("section", secList);
+      }
+    }
+
+    const { data, error } = await q;
+    if(error) throw error;
+
+    // Client-side narrow to exact (section, department) pairs assigned,
+    // since Supabase .in() above only filtered by section.
+    let rows = data || [];
+    if(!IS_SUPER_ADMIN_BLANKET){
+      const allowed = new Set(MY_SCOPES.map(s => s.section + "||" + s.department));
+      rows = rows.filter(r => allowed.has(r.section + "||" + r.department));
+    }
+
+    if(!rows.length){ wrap.innerHTML = "<p>No pending overtime entries.</p>"; return; }
+
+    let html = "<table><thead><tr><th>Form No.</th><th>Section</th><th>Department</th><th>Overtime Date</th><th>Hours</th><th>Status</th><th>Open</th></tr></thead><tbody>";
+    rows.forEach(r=>{
+      const isRejected = r.status === "rejected_to_step2";
+      html += "<tr>" +
+        "<td>" + (r.overtime_initiations?.form_number||"") + "</td>" +
+        "<td>" + r.section + "</td>" +
+        "<td>" + r.department + "</td>" +
+        "<td>" + (r.overtime_initiations?.overtime_date||"") + "</td>" +
+        "<td>" + (r.overtime_initiations?.propose_hours||"") + "</td>" +
+        "<td><span class=\"tag " + (isRejected?"rejected":"new") + "\">" + (isRejected?"NEEDS CORRECTION":"NEW") + "</span></td>" +
+        "<td><button class=\"mini\" onclick=\"openEntry(" + r.id + ")\">Open</button></td>" +
+        "</tr>";
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:var(--red);'>❌ " + e.message + "</p>";
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// OPEN AN ENTRY — show its info, existing employees, and the
+// add-employee form.
+// ─────────────────────────────────────────────────────────
+async function openEntry(entryId){
+  const { data: entry, error } = await sb.from("overtime_department_entries")
+    .select("*, overtime_initiations(form_number, form_date, overtime_date, propose_hours, section)")
+    .eq("id", entryId).single();
+  if(error){ alert("Could not open entry: " + error.message); return; }
+
+  CURRENT_ENTRY = entry;
+  document.getElementById("workCard").style.display = "block";
+  document.getElementById("workTitle").textContent = "Working on " + (entry.overtime_initiations?.form_number||"") + " — " + entry.department;
+
+  document.getElementById("entryInfo").innerHTML = `<div class="infobox">
+    <b>Form No.:</b> ${entry.overtime_initiations?.form_number||""} &nbsp;|&nbsp;
+    <b>Section:</b> ${entry.section} &nbsp;|&nbsp;
+    <b>Department:</b> ${entry.department} &nbsp;|&nbsp;
+    <b>Overtime Date:</b> ${entry.overtime_initiations?.overtime_date||""} &nbsp;|&nbsp;
+    <b>Propose Hours:</b> ${entry.overtime_initiations?.propose_hours||""}
+  </div>`;
+
+  const rejBanner = document.getElementById("rejBanner");
+  const responseWrap = document.getElementById("responseNoteWrap");
+  if(entry.status === "rejected_to_step2"){
+    const { data: rej } = await sb.from("overtime_approvals").select("reason, approver_username, decided_at")
+      .eq("department_entry_id", entryId).eq("step", 3).eq("decision", "rejected")
+      .order("decided_at", { ascending: false }).limit(1).maybeSingle();
+    rejBanner.innerHTML = `<div class="rejbox"><b>⚠ Rejected by ${rej?.approver_username||"Step 3"}:</b> ${rej?.reason || "No reason given."}</div>`;
+    responseWrap.style.display = "block";
+  } else {
+    rejBanner.innerHTML = "";
+    responseWrap.style.display = "none";
+  }
+  document.getElementById("responseNoteInput").value = "";
+
+  document.getElementById("empIdInput").value = "";
+  document.getElementById("empNameDisplay").value = "";
+  document.getElementById("reasonInput").value = "";
+  document.getElementById("addStatus").textContent = "";
+  document.getElementById("submitStatus").textContent = "";
+
+  await loadEntryEmployees(entryId);
+  document.getElementById("workCard").scrollIntoView({ behavior:"smooth" });
+}
+
+function closeWorkCard(){
+  CURRENT_ENTRY = null;
+  document.getElementById("workCard").style.display = "none";
+}
+
+async function loadEntryEmployees(entryId){
+  const { data, error } = await sb.from("overtime_employees").select("*").eq("department_entry_id", entryId).order("created_at");
+  const wrap = document.getElementById("employeesListWrap");
+  if(error){ wrap.innerHTML = "<p style='color:var(--red);'>❌ " + error.message + "</p>"; return; }
+  CURRENT_EMPLOYEES = data || [];
+
+  if(!CURRENT_EMPLOYEES.length){ wrap.innerHTML = "<p class='sub'>No employees added yet.</p>"; return; }
+
+  let html = "<table><thead><tr><th>ID</th><th>Name</th><th>Reason</th><th></th></tr></thead><tbody>";
+  CURRENT_EMPLOYEES.forEach(e=>{
+    html += "<tr id=\"emprow_" + e.id + "\"><td>" + e.employee_code + "</td><td>" + e.employee_name + "</td>" +
+      "<td id=\"reasoncell_" + e.id + "\">" + e.reason_for_overtime + "</td>" +
+      "<td><button class=\"mini\" onclick=\"editReason(" + e.id + ")\">Edit</button> " +
+      "<button class=\"mini red\" onclick=\"removeEmployeeFromEntry(" + e.id + ")\">Remove</button></td></tr>";
+  });
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+}
+
+// Turns the Reason cell into an editable textarea in place, so a small
+// correction (e.g. after a Step 3 rejection) doesn't require removing and
+// re-adding the whole employee row.
+function editReason(rowId){
+  const emp = CURRENT_EMPLOYEES.find(e=>e.id===rowId);
+  if(!emp) return;
+  const cell = document.getElementById("reasoncell_" + rowId);
+  cell.innerHTML = `<textarea id="reasonEdit_${rowId}" style="min-height:50px;">${emp.reason_for_overtime}</textarea>
+    <button class="mini green" style="margin-top:6px;" onclick="saveReason(${rowId})">Save</button>
+    <button class="mini" style="margin-top:6px;background:#6b7280;" onclick="loadEntryEmployees(CURRENT_ENTRY.id)">Cancel</button>`;
+}
+
+async function saveReason(rowId){
+  const newReason = document.getElementById("reasonEdit_" + rowId).value.trim();
+  if(!newReason){ alert("Reason cannot be empty."); return; }
+  try{
+    const { error } = await sb.from("overtime_employees").update({ reason_for_overtime: newReason }).eq("id", rowId);
+    if(error) throw error;
+    await loadEntryEmployees(CURRENT_ENTRY.id);
+  }catch(e){
+    alert("Could not save: " + e.message);
+  }
+}
+
+// Auto-lookup: as the ID is typed, find a matching employee and fill the
+// Name field, or show a clear "not found" state.
+function lookupEmployee(){
+  const idVal = document.getElementById("empIdInput").value.trim();
+  const nameField = document.getElementById("empNameDisplay");
+  if(!idVal){ nameField.value = ""; nameField.className = ""; return; }
+
+  const match = EMPLOYEES.find(e => e.employee_id.toLowerCase() === idVal.toLowerCase());
+  if(match){
+    nameField.value = match.full_name;
+    nameField.className = "found-name";
+  } else {
+    nameField.value = "Not found";
+    nameField.className = "not-found";
+  }
+}
+
+async function addEmployeeToEntry(){
+  const status = document.getElementById("addStatus");
+  if(!CURRENT_ENTRY){ return; }
+
+  const idVal = document.getElementById("empIdInput").value.trim();
+  const reason = document.getElementById("reasonInput").value.trim();
+  const match = EMPLOYEES.find(e => e.employee_id.toLowerCase() === idVal.toLowerCase());
+
+  if(!idVal || !match){ status.className="status err"; status.textContent="Enter a valid Employee ID (must exist in our employee list)."; return; }
+  if(!reason){ status.className="status err"; status.textContent="Enter a Reason for Overtime."; return; }
+
+  status.className="status"; status.textContent="Adding...";
+  try{
+    const { error } = await sb.from("overtime_employees").insert({
+      department_entry_id: CURRENT_ENTRY.id,
+      employee_id: match.id,
+      employee_code: match.employee_id,
+      employee_name: match.full_name,
+      reason_for_overtime: reason
+    });
+    if(error) throw error;
+
+    status.className = "status ok"; status.textContent = "✅ Added.";
+    document.getElementById("empIdInput").value = "";
+    document.getElementById("empNameDisplay").value = "";
+    document.getElementById("empNameDisplay").className = "";
+    document.getElementById("reasonInput").value = "";
+    await loadEntryEmployees(CURRENT_ENTRY.id);
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function removeEmployeeFromEntry(rowId){
+  if(!confirm("Remove this employee from the overtime request?")) return;
+  try{
+    const { error } = await sb.from("overtime_employees").delete().eq("id", rowId);
+    if(error) throw error;
+    await loadEntryEmployees(CURRENT_ENTRY.id);
+  }catch(e){
+    alert("Could not remove: " + e.message);
+  }
+}
+
+async function submitEntry(){
+  const status = document.getElementById("submitStatus");
+  if(!CURRENT_ENTRY) return;
+  if(!CURRENT_EMPLOYEES.length){ status.className="status err"; status.textContent="Add at least one employee before submitting."; return; }
+
+  const isCorrection = CURRENT_ENTRY.status === "rejected_to_step2";
+  const responseNote = document.getElementById("responseNoteInput").value.trim();
+  if(isCorrection && !responseNote){
+    status.className="status err"; status.textContent="Enter a Response to Rejection before resubmitting."; return;
+  }
+
+  status.className="status"; status.textContent="Submitting...";
+  try{
+    const updateFields = { status: "awaiting_step3", updated_at: new Date().toISOString() };
+    if(isCorrection) updateFields.correction_note = responseNote;
+
+    const { error } = await sb.from("overtime_department_entries")
+      .update(updateFields)
+      .eq("id", CURRENT_ENTRY.id);
+    if(error) throw error;
+
+    await logActivity("overtime_step2_submitted", ME.username + " submitted overtime entry #" + CURRENT_ENTRY.id + " (" + CURRENT_ENTRY.section + " / " + CURRENT_ENTRY.department + ") with " + CURRENT_EMPLOYEES.length + " employee(s)" + (isCorrection ? ". Response: " + responseNote : ""));
+    status.className = "status ok"; status.textContent = "✅ Submitted for Step 3 approval.";
+
+    closeWorkCard();
+    await loadQueue();
+    await loadHistory();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// HISTORY — everything in my scope, any status, date-range filterable
+// ─────────────────────────────────────────────────────────
+async function loadHistory(){
+  const wrap = document.getElementById("historyWrap");
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    let q = sb.from("overtime_department_entries").select("*, overtime_initiations(form_number, form_date, overtime_date, propose_hours)")
+      .order("created_at", { ascending: false });
+
+    if(!IS_SUPER_ADMIN_BLANKET && MY_SCOPES.length){
+      const secList = [...new Set(MY_SCOPES.map(s=>s.section))];
+      q = q.in("section", secList);
+    }
+
+    const { data, error } = await q;
+    if(error) throw error;
+
+    let rows = data || [];
+    if(!IS_SUPER_ADMIN_BLANKET){
+      const allowed = new Set(MY_SCOPES.map(s => s.section + "||" + s.department));
+      rows = rows.filter(r => allowed.has(r.section + "||" + r.department));
+    }
+    // Date range is applied client-side against the joined initiation's
+    // form_date, since Supabase embedded-resource filters need an explicit
+    // inner-join hint to work reliably — filtering after fetch avoids that.
+    if(from) rows = rows.filter(r => (r.overtime_initiations?.form_date||"") >= from);
+    if(to)   rows = rows.filter(r => (r.overtime_initiations?.form_date||"") <= to);
+    ALL_HISTORY = rows;
+
+    if(!rows.length){ wrap.innerHTML = "<p>No history to show.</p>"; return; }
+
+    let html = "<table><thead><tr><th>Form No.</th><th>Section</th><th>Department</th><th>Status</th><th>PDF</th></tr></thead><tbody>";
+    rows.forEach(r=>{
+      html += "<tr><td>" + (r.overtime_initiations?.form_number||"") + "</td><td>" + r.section + "</td><td>" + r.department + "</td>" +
+        "<td>" + r.status + "</td>" +
+        "<td><button class=\"mini\" onclick=\"openHistoryPDF(" + r.id + ")\">PDF</button></td></tr>";
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:var(--red);'>❌ " + e.message + "</p>";
+  }
+}
+
+async function openHistoryPDF(entryId){
+  const r = ALL_HISTORY.find(x=>x.id===entryId);
+  if(!r) return;
+  const { data: emps } = await sb.from("overtime_employees").select("*").eq("department_entry_id", entryId).order("created_at");
+
+  let rowsHtml = (emps||[]).map(e=>`<tr><td>${e.employee_code}</td><td>${e.employee_name}</td><td>${e.reason_for_overtime}</td></tr>`).join("");
+
+  const html = `
+<html><head><style>
+@page { size:A4; margin:40pt 50pt; }
+body { font-family:"Times New Roman", serif; font-size:12pt; margin:0; padding:40px; color:#000; }
+h2 { text-align:center; font-size:18pt; margin:0 0 4px; }
+h3 { text-align:center; font-size:14pt; margin:0 0 24px; letter-spacing:2px; }
+table { width:100%; border-collapse:collapse; margin-top:10px; }
+td,th { padding:8px 10px; border:1px solid #000; vertical-align:top; text-align:left; }
+</style></head><body>
+<h2>${COMPANY}</h2>
+<h3>OVERTIME — DEPARTMENT SUBMISSION</h3>
+<p><b>Form No.:</b> ${r.overtime_initiations?.form_number||""} &nbsp; <b>Section:</b> ${r.section} &nbsp; <b>Department:</b> ${r.department}</p>
+<table><thead><tr><th>ID</th><th>Name</th><th>Reason</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+</body></html>`;
+
+  const w = window.open("", "_blank");
+  w.document.write(html);
+  w.document.close();
+  w.onload = function(){ w.focus(); w.print(); };
+}
+
+init();
+</script>
+</body>
+</html>

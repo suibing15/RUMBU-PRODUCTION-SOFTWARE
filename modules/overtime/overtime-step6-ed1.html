@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overtime — Step 6 ED1</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    function apply(t){ if(t) document.documentElement.setAttribute("data-theme", t); }
+    window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme) apply(e.data.rumbuTheme); });
+    try{ apply(localStorage.getItem("rumbu_theme")); }catch(e){}
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  :root{--navy:var(--heading);--blue:var(--accent);--blue-dark:var(--accent-2);--muted:#6b7280;--red:#c0392b;--green:#1d8a4e;--amber:#d97706;}
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:var(--bg);margin:0;padding:18px;color:var(--text);}
+  .wrap{max-width:1000px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h3{color:var(--navy);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--blue);font-size:12px;margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:10px 0 4px;}
+  input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;}
+  .row > div{flex:1;min-width:160px;}
+  button{padding:10px 14px;border:none;border-radius:8px;font-weight:bold;font-size:13px;cursor:pointer;background:var(--blue);color:#fff;margin-top:10px;}
+  button:hover{background:var(--blue-dark);}
+  button.mini{padding:6px 10px;font-size:12px;margin-top:0;}
+  button.green{background:var(--green);} button.green:hover{background:#166a2c;}
+  button.red{background:var(--red);} button.red:hover{background:#96242e;}
+  .status{margin-top:10px;font-weight:bold;font-size:13px;min-height:16px;}
+  .status.ok{color:var(--green);} .status.err{color:var(--red);}
+  #connStatus{font-size:12px;font-weight:bold;text-align:center;margin-bottom:10px;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  thead th{background:var(--navy);color:#fff;font-size:12px;}
+  tbody tr:nth-child(even){background:#f6f8fb;}
+  tfoot td{font-weight:bold;background:#e9f2ff;}
+  .noaccess{color:var(--red);font-weight:bold;text-align:center;padding:30px;}
+  .infobox{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;}
+  .progress{font-size:12px;color:var(--muted);margin:6px 0;}
+  .voted{color:var(--green);font-weight:bold;}
+  .noteBox{background:#eaf6ee;border:1px solid var(--green);border-radius:8px;padding:10px 14px;margin-bottom:14px;color:#1d5c31;font-size:13px;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div id="appArea" style="display:none;">
+
+<div class="card">
+  <h3>Overtime — Step 6 ED1 Final Approval</h3>
+  <p class="sub" id="scopeNote"></p>
+  <div class="row">
+    <div><label>Branch</label><select id="branchFilter" onchange="loadQueue()"><option value="all">All</option></select></div>
+    <div style="flex:0 0 auto;"><button class="mini" onclick="loadQueue()">Refresh</button></div>
+  </div>
+  <div id="queueWrap"></div>
+</div>
+
+<div class="card" id="workCard" style="display:none;">
+  <h3 id="workTitle">Reviewing initiation</h3>
+  <div id="rejBanner"></div>
+  <div id="entryInfo"></div>
+  <div id="progressInfo" class="progress"></div>
+  <div id="rollupWrap"></div>
+  <div id="actionArea"></div>
+  <button class="mini" style="background:#6b7280;" onclick="closeWorkCard()">Close</button>
+  <div class="status" id="actionStatus"></div>
+</div>
+
+<div class="card">
+  <h3>ED1 Approval Records</h3>
+  <div class="row">
+    <div><label>Branch</label><select id="histBranchFilter" onchange="loadHistory()"><option value="all">All</option></select></div>
+    <div><label>From Date</label><input type="date" id="fromDate"></div>
+    <div><label>To Date</label><input type="date" id="toDate"></div>
+    <div style="flex:0 0 auto;"><button class="mini" onclick="loadHistory()">Refresh</button></div>
+  </div>
+  <div id="historyWrap"></div>
+</div>
+
+</div>
+
+<div id="noAccess" class="noaccess" style="display:none;">
+  You are not assigned as an ED1 approver. Ask your Super Admin to assign you in Overtime Approver Setup.
+</div>
+</div>
+
+<script>
+let ME = null;
+let AM_ASSIGNED = false;
+let IS_SUPER_ADMIN_BLANKET = false;
+let CURRENT_INIT_ID = null;
+let CURRENT_ROWS = [];   // department_entries at awaiting_step6 for the open initiation
+let ALL_HISTORY_INITS = [];
+const COMPANY = "Rumbu Industries Limited";
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){ console.warn("Activity log write failed (non-fatal):", e); }
+}
+
+function fmtNaira(n){ return "₦" + Number(n||0).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    await checkMyAssignment();
+
+    if(!AM_ASSIGNED && !IS_SUPER_ADMIN_BLANKET){
+      status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+      document.getElementById("noAccess").style.display = "block";
+      return;
+    }
+
+    document.getElementById("appArea").style.display = "block";
+    document.getElementById("scopeNote").textContent = "ED1 — one shared team reviewing every Branch. Use the filter below to narrow the queue.";
+
+    await populateBranchFilters();
+    status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+    await loadQueue();
+    await loadHistory();
+  }catch(e){
+    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+async function checkMyAssignment(){
+  if(ME.role === "super_admin"){ IS_SUPER_ADMIN_BLANKET = true; return; }
+  const { data: emp } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
+  if(!emp) return;
+  const { data: scopes } = await sb.from("overtime_step_approvers").select("id").eq("employee_id", emp.id).eq("step", 6).eq("section", "ALL_BRANCHES");
+  AM_ASSIGNED = !!(scopes && scopes.length);
+}
+
+async function populateBranchFilters(){
+  const { data } = await sb.from("app_sections").select("name").order("name");
+  const opts = '<option value="all">All</option>' + (data||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("");
+  document.getElementById("branchFilter").innerHTML = opts;
+  document.getElementById("histBranchFilter").innerHTML = opts;
+}
+
+// Groups a flat list of department_entries (each carrying its parent
+// initiation info) into one row per initiation, with a Departments/Amount
+// breakdown and a grand Total — the exact rollup Step 6 is meant to show.
+function groupByInitiation(rows){
+  let byInit = {};
+  rows.forEach(r=>{
+    const initId = r.initiation_id;
+    if(!byInit[initId]) byInit[initId] = {
+      initiation_id: initId,
+      form_number: r.overtime_initiations?.form_number || "",
+      overtime_date: r.overtime_initiations?.overtime_date || "",
+      section: r.section,
+      departments: [],
+      total: 0,
+      entry_ids: []
+    };
+    byInit[initId].departments.push({ department: r.department, amount: Number(r.amount)||0, entry_id: r.id, status: r.status });
+    byInit[initId].total += Number(r.amount)||0;
+    byInit[initId].entry_ids.push(r.id);
+  });
+  return Object.values(byInit);
+}
+
+// ─────────────────────────────────────────────────────────
+// QUEUE — initiations with at least one department entry at
+// awaiting_step6, in the filtered Branch (if any).
+// ─────────────────────────────────────────────────────────
+async function loadQueue(){
+  const wrap = document.getElementById("queueWrap");
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    let q = sb.from("overtime_department_entries")
+      .select("id, initiation_id, section, department, status, overtime_initiations(form_number, overtime_date)")
+      .eq("status", "awaiting_step6")
+      .order("created_at", { ascending: false });
+
+    const branchFilter = document.getElementById("branchFilter").value;
+    if(branchFilter !== "all") q = q.eq("section", branchFilter);
+
+    const { data, error } = await q;
+    if(error) throw error;
+
+    const entryIds = (data||[]).map(r=>r.id);
+    let amountMap = {};
+    if(entryIds.length){
+      const { data: emps } = await sb.from("overtime_employees").select("department_entry_id, actual_amount").in("department_entry_id", entryIds);
+      (emps||[]).forEach(e=>{ amountMap[e.department_entry_id] = (amountMap[e.department_entry_id]||0) + (Number(e.actual_amount)||0); });
+    }
+    const rows = (data||[]).map(r=>({ ...r, amount: amountMap[r.id] || 0 }));
+
+    const groups = groupByInitiation(rows);
+    if(!groups.length){ wrap.innerHTML = "<p>No initiations awaiting ED1 approval.</p>"; return; }
+
+    let html = "<table><thead><tr><th>Form No.</th><th>Branch</th><th>Overtime Date</th><th>Departments Ready</th><th>Subtotal</th><th>Open</th></tr></thead><tbody>";
+    groups.forEach(g=>{
+      html += "<tr>" +
+        "<td>" + g.form_number + "</td>" +
+        "<td>" + g.section + "</td>" +
+        "<td>" + g.overtime_date + "</td>" +
+        "<td>" + g.departments.length + "</td>" +
+        "<td>" + fmtNaira(g.total) + "</td>" +
+        "<td><button class=\"mini\" onclick=\"openInitiation(" + g.initiation_id + ")\">Review</button></td>" +
+        "</tr>";
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:var(--red);'>❌ " + e.message + "</p>";
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// REVIEW AN INITIATION — Departments / Amount / Total only,
+// exactly per the Step 6 spec.
+// ─────────────────────────────────────────────────────────
+async function openInitiation(initiationId){
+  const { data: rows, error } = await sb.from("overtime_department_entries")
+    .select("id, section, department, status, cycle, correction_note, overtime_initiations(form_number, overtime_date)")
+    .eq("initiation_id", initiationId).eq("status", "awaiting_step6");
+  if(error){ alert("Could not open initiation: " + error.message); return; }
+  if(!rows || !rows.length){ alert("Nothing currently awaiting ED1 for this initiation."); return; }
+
+  const entryIds = rows.map(r=>r.id);
+  const { data: emps } = await sb.from("overtime_employees").select("department_entry_id, actual_amount").in("department_entry_id", entryIds);
+  let amountMap = {};
+  (emps||[]).forEach(e=>{ amountMap[e.department_entry_id] = (amountMap[e.department_entry_id]||0) + (Number(e.actual_amount)||0); });
+
+  CURRENT_INIT_ID = initiationId;
+  CURRENT_ROWS = rows.map(r=>({ ...r, amount: amountMap[r.id] || 0 }));
+
+  document.getElementById("workCard").style.display = "block";
+  document.getElementById("workTitle").textContent = "Reviewing " + (rows[0].overtime_initiations?.form_number||"");
+  document.getElementById("entryInfo").innerHTML = `<div class="infobox">
+    <b>Form No.:</b> ${rows[0].overtime_initiations?.form_number||""} &nbsp;|&nbsp;
+    <b>Branch:</b> ${rows[0].section} &nbsp;|&nbsp;
+    <b>Overtime Date:</b> ${rows[0].overtime_initiations?.overtime_date||""}
+  </div>`;
+
+  // Show any Step 5 correction notes — one per department that carries
+  // one, since this rollup can cover several departments at once.
+  const withNotes = CURRENT_ROWS.filter(r => r.correction_note);
+  document.getElementById("rejBanner").innerHTML = withNotes.length
+    ? withNotes.map(r => `<div class="noteBox"><b>📝 ${r.department} — Response Note:</b> ${r.correction_note}</div>`).join("")
+    : "";
+
+  let total = 0;
+  let html = "<table><thead><tr><th>Department</th><th>Amount</th></tr></thead><tbody>";
+  CURRENT_ROWS.forEach(r=>{
+    total += r.amount;
+    html += "<tr><td>" + r.department + "</td><td>" + fmtNaira(r.amount) + "</td></tr>";
+  });
+  html += "</tbody></table><table><tfoot><tr><td style='width:83%;'>TOTAL</td><td>" + fmtNaira(total) + "</td></tr></tfoot></table>";
+  document.getElementById("rollupWrap").innerHTML = html;
+
+  await renderApprovalProgress();
+  document.getElementById("workCard").scrollIntoView({ behavior:"smooth" });
+}
+
+function closeWorkCard(){
+  CURRENT_INIT_ID = null;
+  CURRENT_ROWS = [];
+  document.getElementById("workCard").style.display = "none";
+}
+
+// Progress is read from the FIRST department entry in the batch — since
+// every entry shown here is decided together in one click, they move in
+// lockstep and share the same voting state in practice.
+async function renderApprovalProgress(){
+  const primary = CURRENT_ROWS[0];
+
+  const { data: requiredLinks } = await sb.from("overtime_step_approvers")
+    .select("employee_id, employees(linked_profile_id)")
+    .eq("section", "ALL_BRANCHES").eq("step", 6);
+  const requiredProfileIds = (requiredLinks||[]).map(r=>r.employees?.linked_profile_id).filter(Boolean);
+  const requiredCount = requiredProfileIds.length;
+
+  const { data: votes } = await sb.from("overtime_approvals")
+    .select("approver_profile_id, decision")
+    .eq("department_entry_id", primary.id).eq("step", 6).eq("cycle", primary.cycle);
+
+  const approvedIds = new Set((votes||[]).filter(v=>v.decision==="approved").map(v=>v.approver_profile_id));
+  const iHaveVoted = (votes||[]).some(v=>v.approver_profile_id===ME.id);
+
+  document.getElementById("progressInfo").textContent =
+    approvedIds.size + " of " + requiredCount + " required ED1 approver(s) have signed off so far." +
+    (IS_SUPER_ADMIN_BLANKET ? " (As Super Admin, your approval will complete this step immediately.)" : "");
+
+  const actionWrap = document.getElementById("actionArea");
+  const amRequired = IS_SUPER_ADMIN_BLANKET || requiredProfileIds.indexOf(ME.id) !== -1;
+
+  if(iHaveVoted){
+    actionWrap.innerHTML = "<p class='voted'>✅ You have already reviewed this initiation this round.</p>";
+  } else if(!amRequired){
+    actionWrap.innerHTML = "<p class='sub'>You are viewing this as Super Admin, but are not a required ED1 approver.</p>";
+  } else {
+    actionWrap.innerHTML = `
+      <button class="green" onclick="voteInitiation('approved')">Approve for Final Disbursement</button>
+      <button class="red" onclick="voteInitiation('rejected')">Reject</button>`;
+  }
+}
+
+async function voteInitiation(decision){
+  const status = document.getElementById("actionStatus");
+  if(!CURRENT_ROWS.length) return;
+
+  let reason = null;
+  if(decision === "rejected"){
+    reason = prompt("Reason for rejecting this initiation back to Step 5:", "");
+    if(reason === null) return;
+    if(!reason.trim()){ status.className="status err"; status.textContent="A reason is required to reject."; return; }
+  } else {
+    if(!confirm("Approve this initiation for final disbursement?")) return;
+  }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    // Record this approver's decision against every department entry in
+    // this batch, each using its OWN current cycle — entries can be at
+    // different cycles if one was bounced back earlier and others weren't.
+    for(const row of CURRENT_ROWS){
+      const { error: voteErr } = await sb.from("overtime_approvals").insert({
+        department_entry_id: row.id, step: 6, cycle: row.cycle,
+        approver_profile_id: ME.id, approver_username: ME.username,
+        decision, reason: decision==="rejected" ? reason : null
+      });
+      if(voteErr) throw voteErr;
+    }
+
+    if(decision === "rejected"){
+      for(const row of CURRENT_ROWS){
+        const { error: updErr } = await sb.from("overtime_department_entries").update({
+          status: "rejected_to_step5", cycle: row.cycle + 1, updated_at: new Date().toISOString()
+        }).eq("id", row.id);
+        if(updErr) throw updErr;
+      }
+      await logActivity("overtime_step6_rejected", ME.username + " rejected initiation #" + CURRENT_INIT_ID + " back to Step 5. Reason: " + reason);
+      status.className = "status ok"; status.textContent = "Rejected and sent back to Step 5.";
+      closeWorkCard();
+      await loadQueue();
+      await loadHistory();
+      return;
+    }
+
+    // Approved — check completion per entry (Super Admin completes instantly)
+    let anyCompleted = false;
+    for(const row of CURRENT_ROWS){
+      let allApproved = (ME.role === "super_admin");
+      if(!allApproved){
+        const { data: requiredLinks } = await sb.from("overtime_step_approvers")
+          .select("employee_id, employees(linked_profile_id)")
+          .eq("section", "ALL_BRANCHES").eq("step", 6);
+        const requiredProfileIds = (requiredLinks||[]).map(r=>r.employees?.linked_profile_id).filter(Boolean);
+
+        const { data: votes } = await sb.from("overtime_approvals")
+          .select("approver_profile_id, decision")
+          .eq("department_entry_id", row.id).eq("step", 6).eq("cycle", row.cycle);
+        const approvedIds = new Set((votes||[]).filter(v=>v.decision==="approved").map(v=>v.approver_profile_id));
+
+        allApproved = requiredProfileIds.length > 0 && requiredProfileIds.every(id => approvedIds.has(id));
+      }
+      if(allApproved){
+        const { error: updErr } = await sb.from("overtime_department_entries").update({
+          status: "completed", updated_at: new Date().toISOString()
+        }).eq("id", row.id);
+        if(updErr) throw updErr;
+        anyCompleted = true;
+      }
+    }
+
+    await logActivity("overtime_step6_approved", ME.username + " approved initiation #" + CURRENT_INIT_ID + " for final disbursement");
+    status.className = "status ok"; status.textContent = anyCompleted
+      ? "✅ All approvers signed off — this overtime is now fully completed."
+      : "✅ Your approval was recorded. Awaiting other ED1 approver(s).";
+
+    closeWorkCard();
+    await loadQueue();
+    await loadHistory();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// HISTORY — every initiation with at least one entry that has
+// reached Step 6 (regardless of current outcome), branch + date
+// filterable, PDF per initiation.
+// ─────────────────────────────────────────────────────────
+async function loadHistory(){
+  const wrap = document.getElementById("historyWrap");
+  const branchFilter = document.getElementById("histBranchFilter").value;
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    let q = sb.from("overtime_department_entries")
+      .select("id, initiation_id, section, department, status, overtime_initiations(form_number, form_date, overtime_date)")
+      .in("status", ["awaiting_step6","rejected_to_step5","completed"])
+      .order("created_at", { ascending: false });
+    if(branchFilter !== "all") q = q.eq("section", branchFilter);
+
+    const { data, error } = await q;
+    if(error) throw error;
+
+    let rows = data || [];
+    if(from) rows = rows.filter(r => (r.overtime_initiations?.form_date||"") >= from);
+    if(to)   rows = rows.filter(r => (r.overtime_initiations?.form_date||"") <= to);
+
+    const entryIds = rows.map(r=>r.id);
+    let amountMap = {};
+    if(entryIds.length){
+      const { data: emps } = await sb.from("overtime_employees").select("department_entry_id, actual_amount").in("department_entry_id", entryIds);
+      (emps||[]).forEach(e=>{ amountMap[e.department_entry_id] = (amountMap[e.department_entry_id]||0) + (Number(e.actual_amount)||0); });
+    }
+    rows = rows.map(r=>({ ...r, amount: amountMap[r.id] || 0 }));
+
+    const groups = groupByInitiation(rows);
+    ALL_HISTORY_INITS = groups;
+
+    if(!groups.length){ wrap.innerHTML = "<p>No history to show.</p>"; return; }
+
+    let html = "<table><thead><tr><th>Form No.</th><th>Branch</th><th>Departments</th><th>Total</th><th>PDF</th></tr></thead><tbody>";
+    groups.forEach(g=>{
+      html += "<tr><td>" + g.form_number + "</td><td>" + g.section + "</td><td>" + g.departments.length + "</td>" +
+        "<td>" + fmtNaira(g.total) + "</td>" +
+        "<td><button class=\"mini\" onclick=\"openHistoryPDF(" + g.initiation_id + ")\">PDF</button></td></tr>";
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:var(--red);'>❌ " + e.message + "</p>";
+  }
+}
+
+function openHistoryPDF(initiationId){
+  const g = ALL_HISTORY_INITS.find(x=>x.initiation_id===initiationId);
+  if(!g) return;
+
+  let rowsHtml = g.departments.map(d => `<tr><td>${d.department}</td><td>${fmtNaira(d.amount)}</td></tr>`).join("");
+
+  const html = `
+<html><head><style>
+@page { size:A4; margin:40pt 50pt; }
+body { font-family:"Times New Roman", serif; font-size:12pt; margin:0; padding:40px; color:#000; }
+h2 { text-align:center; font-size:18pt; margin:0 0 4px; }
+h3 { text-align:center; font-size:14pt; margin:0 0 24px; letter-spacing:2px; }
+table { width:100%; border-collapse:collapse; margin-top:10px; }
+td,th { padding:8px 10px; border:1px solid #000; vertical-align:top; text-align:left; }
+tfoot td{font-weight:bold;}
+</style></head><body>
+<h2>${COMPANY}</h2>
+<h3>OVERTIME — ED1 FINAL APPROVAL RECORD</h3>
+<p><b>Form No.:</b> ${g.form_number} &nbsp; <b>Branch:</b> ${g.section} &nbsp; <b>Overtime Date:</b> ${g.overtime_date}</p>
+<table><thead><tr><th>Department</th><th>Amount</th></tr></thead>
+<tbody>${rowsHtml}</tbody>
+<tfoot><tr><td>TOTAL</td><td>${fmtNaira(g.total)}</td></tr></tfoot>
+</table>
+</body></html>`;
+
+  const w = window.open("", "_blank");
+  w.document.write(html);
+  w.document.close();
+  w.onload = function(){ w.focus(); w.print(); };
+}
+
+init();
+</script>
+</body>
+</html>

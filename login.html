@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rumbu Industries — Login</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--navy:#1F3864;--blue:#2E75B6;--blue-dark:#245d92;--line:#d8dee8;--bg:#eef2f7;--red:#c0392b;
+    --sans:"Inter","Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:linear-gradient(135deg,var(--navy) 0%,#142a4d 100%);margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .card{background:#fff;border-radius:14px;padding:36px 30px;width:100%;max-width:380px;box-shadow:0 12px 32px rgba(0,0,0,.25);}
+  h1{color:var(--navy);font-size:18px;text-align:center;margin:0 0 4px;letter-spacing:.5px;}
+  p.sub{text-align:center;color:#6b7280;font-size:12px;margin:0 0 24px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:14px 0 4px;}
+  input{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  input:focus{outline:2px solid var(--blue);border-color:var(--blue);}
+  button{width:100%;padding:12px;margin-top:20px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;}
+  button:hover{background:var(--blue-dark);}
+  button:disabled{opacity:.6;cursor:not-allowed;}
+  .status{margin-top:14px;text-align:center;font-size:13px;font-weight:bold;min-height:16px;}
+  .status.err{color:var(--red);}
+  .status.ok{color:#1d8a4e;}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>SOFTWARE NAME</h1>
+  <p class="sub">RUMBU INDUSTRIES GROUP &bull; Sign in</p>
+
+  <label>Username</label>
+  <input type="text" id="username" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('password').focus();}">
+
+  <label>Password</label>
+  <input type="password" id="password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){login();}">
+
+  <button id="loginBtn" onclick="login()">LOG IN</button>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://betfhunzmhtdzgvufmfk.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_AfDp1FlHghu9TOfqEUj20Q_Pke7GlTp";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+async function login(){
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  const status = document.getElementById("status");
+  const btn = document.getElementById("loginBtn");
+
+  if(!username || !password){
+    status.className = "status err"; status.textContent = "Enter your username and password.";
+    return;
+  }
+
+  btn.disabled = true; btn.innerText = "Signing in...";
+  status.className = "status"; status.textContent = "";
+
+  try{
+    // Look up the real login email tied to this username. Super Admins
+    // use their own real email as their username too, so this works for
+    // everyone the same way.
+    const { data: email, error: rpcErr } = await sb.rpc("resolve_username_to_email", { p_username: username });
+    if(rpcErr || !email){
+      status.className = "status err"; status.textContent = "Invalid username or password.";
+      return;
+    }
+
+    const { error: signInErr } = await sb.auth.signInWithPassword({ email, password });
+    if(signInErr){
+      status.className = "status err"; status.textContent = "Invalid username or password.";
+      return;
+    }
+
+    status.className = "status ok"; status.textContent = "Signed in. Loading...";
+    window.location.href = "index.html";
+  }catch(e){
+    status.className = "status err"; status.textContent = "Error: " + (e.message||e);
+  }finally{
+    btn.disabled = false; btn.innerText = "LOG IN";
+  }
+}
+</script>
+</body>
+</html>

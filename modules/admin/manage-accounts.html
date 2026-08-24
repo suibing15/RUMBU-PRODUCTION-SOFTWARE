@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manage Accounts</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  // Inherit the theme chosen in the shell (per-device), and react to live switches.
+  (function(){
+    try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme") || "navy"); }catch(e){}
+  })();
+  window.addEventListener("message", function(e){
+    if(e.data && e.data.rumbuTheme){ document.documentElement.setAttribute("data-theme", e.data.rumbuTheme); }
+  });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  /* Page-specific styles; base look + theme come from shared styles.css */
+  body{padding:20px;}
+  .wrap{max-width:1120px;margin:0 auto;}
+
+  /* Two-column admin shell: left nav + right panel */
+  .admin-shell{display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:start;}
+  .admin-nav{position:sticky;top:12px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:8px;display:flex;flex-direction:column;gap:2px;}
+  .admin-nav .nav-title{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);padding:8px 10px 4px;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--text);border:none;background:none;width:100%;text-align:left;margin:0;transition:background .12s;}
+  .nav-item:hover{background:var(--bg);}
+  .nav-item.active{background:var(--accent);color:var(--logo-fg);}
+  .nav-item .ico{width:18px;text-align:center;font-size:15px;flex:0 0 auto;}
+  .admin-main{min-width:0;}
+  .panel{display:none;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px;}
+  .panel.active{display:block;}
+  .panel-head{margin:0 0 4px;color:var(--heading);font-size:18px;}
+  .panel-sub{color:var(--muted);font-size:12.5px;margin:0 0 18px;}
+
+  @media(max-width:820px){
+    .admin-shell{grid-template-columns:1fr;}
+    .admin-nav{position:static;flex-direction:row;flex-wrap:wrap;overflow-x:auto;}
+    .nav-item{width:auto;}
+    .admin-nav .nav-title{display:none;}
+  }
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .card h3{color:var(--heading);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--muted);font-size:12.5px;margin:0 0 14px;}
+  label{display:block;font-size:12.5px;font-weight:700;color:var(--text);margin:10px 0 6px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:600px){.grid{grid-template-columns:1fr;}}
+  .checks{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
+  .checks label{display:flex;align-items:center;gap:6px;font-weight:normal;background:var(--bg);border:1px solid var(--line);padding:6px 10px;border-radius:6px;font-size:13px;margin:0;}
+  .checks input{width:auto;}
+  .section-block{border:1px solid var(--line);border-radius:8px;margin-top:8px;padding:10px;background:var(--card);}
+  .section-block > label{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--heading);margin:0;}
+  .section-block > label input{width:auto;}
+  .page-group{margin-top:8px;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .page-group-title{font-weight:700;color:var(--heading);font-size:13px;padding:8px 10px;cursor:pointer;background:var(--bg);list-style:none;}
+  .page-group-title::-webkit-details-marker{display:none;}
+  .page-group-title::before{content:"\25B6 ";font-size:10px;color:var(--muted);}
+  .page-group[open] .page-group-title::before{content:"\25BC ";}
+  .page-group .checks{padding:8px 10px;margin-top:0;}
+  button{margin-top:14px;}
+  button.danger{background:var(--bad);} button.ghost{background:var(--bg);color:var(--heading);border:1px solid var(--line-2);}
+  table{margin-top:12px;}
+  .badge{display:inline-block;background:var(--accent);color:var(--logo-fg);padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;}
+  .search-result-row{padding:8px 10px;border:1px solid var(--line);border-radius:6px;margin-top:4px;cursor:pointer;background:var(--card);}
+  .search-result-row:hover{background:var(--bg);}
+  #connStatus{font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);}
+  .hidden{display:none;}
+  .details-body{padding:0;}
+  .role-panel{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:14px;}
+  .tab-bar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin-bottom:16px;}
+  .tab-btn{background:none;border:none;padding:10px 14px;font-weight:700;font-size:13px;color:var(--muted);cursor:pointer;margin:0;border-bottom:3px solid transparent;}
+  .tab-btn:hover{background:var(--bg);color:var(--heading);}
+  .tab-btn.active{color:var(--heading);border-bottom-color:var(--accent);}
+  .tab-content.hidden{display:none;}
+  .branch-block{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden;}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:5px 6px 5px 12px;margin:3px 4px 0 0;font-size:12px;}
+  .chip button{margin:0;padding:0;width:18px;height:18px;line-height:16px;border-radius:50%;background:#c0392b;color:#fff;font-size:12px;font-weight:bold;border:none;cursor:pointer;}
+  .branch-block summary{padding:10px 14px;cursor:pointer;background:var(--bg);list-style:none;display:flex;align-items:center;gap:8px;font-weight:700;color:var(--heading);}
+  .branch-block summary::-webkit-details-marker{display:none;}
+  .branch-block summary::before{content:"\25B6 ";font-size:11px;color:var(--muted);}
+  .branch-block[open] summary::before{content:"\25BC ";}
+  .branch-block .dept-rows{padding:10px 14px;}
+  .branch-block .dept-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);}
+  .branch-block .dept-row:last-child{border-bottom:none;}
+  .branch-block input{flex:1;}
+  .branch-block .mini-btn{width:auto;flex:0 0 auto;padding:6px 10px;margin:0;}
+  #printArea{display:none;}
+  @media print{
+    body{padding:0;} .wrap{display:none !important;}
+    #printArea{display:block;padding:10px;}
+    #printArea .grp{font-size:11pt;letter-spacing:1px;color:#000;font-weight:bold;}
+    #printArea h1{font-size:16pt;color:#000;margin:0;}
+    #printArea .meta{font-size:10pt;margin:6px 0 12px;color:#222;}
+    #printArea table{width:100%;border-collapse:collapse;font-size:9pt;}
+    #printArea th,#printArea td{border:1px solid #444;padding:5px 7px;text-align:left;}
+    #printArea thead th{background:#1F3864 !important;color:#fff !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<button onclick="(window.parent&&window.parent.closeModule)?window.parent.closeModule():(window.location.href='../../index.html')" style="max-width:220px;margin-bottom:12px;background:var(--accent);color:var(--logo-fg);">&larr; Back to Dashboard</button>
+<div id="connStatus">Loading...</div>
+
+<div class="admin-shell">
+  <nav class="admin-nav" id="adminNav">
+    <div class="nav-title">Account Admin</div>
+    <button class="nav-item" data-sec="sec-create-user"    id="nav-create-user"    onclick="showSection('sec-create-user')"><span class="ico">➕</span> Create User</button>
+    <button class="nav-item" data-sec="sec-manage-user"    id="nav-manage-user"    onclick="showSection('sec-manage-user')"><span class="ico">👥</span> Manage Role</button>
+    <button class="nav-item" data-sec="sec-change-password" id="nav-change-password" onclick="showSection('sec-change-password')"><span class="ico">🔑</span> Change Password</button>
+    <button class="nav-item" data-sec="sec-activity-log"   id="nav-activity-log"   onclick="showSection('sec-activity-log')"><span class="ico">📜</span> Activity Log</button>
+    <button class="nav-item" data-sec="sec-settings"       id="nav-settings"       onclick="showSection('sec-settings')"><span class="ico">⚙️</span> Settings</button>
+  </nav>
+
+  <div class="admin-main">
+
+<section class="panel" id="sec-create-user">
+<h2 class="panel-head">Create User</h2>
+<div class="details-body">
+
+<div class="hidden" id="superAdminTabs">
+  <div class="tab-bar">
+    <button class="tab-btn" id="tabbtn-create-sa" onclick="showCreateTab('tab-create-sa')">Create Super Admin</button>
+    <button class="tab-btn" id="tabbtn-create-admin" onclick="showCreateTab('tab-create-admin')">Create Admin</button>
+    <button class="tab-btn" id="tabbtn-create-user-sa" onclick="showCreateTab('tab-create-user-sa')">Create User</button>
+    <button class="tab-btn" id="tabbtn-employee-directory" onclick="showCreateTab('tab-employee-directory')">Employee Directory</button>
+    <button class="tab-btn" id="tabbtn-add-branch-dept" onclick="showCreateTab('tab-add-branch-dept')">Add Branch or Module</button>
+    <button class="tab-btn" id="tabbtn-manage-departments" onclick="showCreateTab('tab-manage-departments')">Manage Departments &amp; Units</button>
+    <button class="tab-btn" id="tabbtn-manage-branch-dept" onclick="showCreateTab('tab-manage-branch-dept')">Manage Branch or Department</button>
+    <button class="tab-btn" id="tabbtn-branch-modules" onclick="showCreateTab('tab-branch-modules')">Branch Modules</button>
+  </div>
+
+  <div class="tab-content" id="tab-create-sa">
+    <h3>Create Another Super Admin</h3>
+    <p class="sub">Uses a real email address, since this is the highest-privilege account tier</p>
+    <div class="form-row">
+      <div class="field"><label>Username</label><input id="sa_username" placeholder="Username"></div>
+      <div class="field"><label>Real Email</label><input id="sa_email" type="email" placeholder="name@rumbuindustries.com"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Password</label><input id="sa_password" type="password" placeholder="Set a password"></div>
+      <div class="field"><label>Type</label>
+        <select id="sa_type"><option value="management">management</option><option value="technical">technical</option></select>
+      </div>
+    </div>
+    <button onclick="createSuperAdmin()">CREATE SUPER ADMIN</button>
+    <div class="status" id="sa_status"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-create-admin">
+    <h3>Create Admin Account</h3>
+    <p class="sub">Admins are Plant Managers. Branches and the exact modules each Admin may use are assigned afterward in Manage Role.</p>
+    <div class="field"><label>Username</label><input id="a_username" placeholder="Choose a username"></div>
+    <div class="field"><label>Password</label><input id="a_password" type="password" placeholder="Set a password"></div>
+    <button onclick="createAdmin()">CREATE ADMIN</button>
+    <div class="status" id="a_status"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-create-user-sa">
+    <h3>Create User Account</h3>
+    <p class="sub">Sections and pages are assigned afterward in Manage Role — a new User starts with no dashboard access until you set that up.</p>
+    <div class="field"><label>Username</label><input id="u2_username" placeholder="Choose a username"></div>
+    <div class="field"><label>Password</label><input id="u2_password" type="password" placeholder="Set a password"></div>
+    <button onclick="createUserAsSuperAdmin()">CREATE USER</button>
+    <div class="status" id="u2_status"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-employee-directory">
+    <h3>Employee Directory</h3>
+    <p class="sub">Browse all employees. Pick a role and click Grant Access to convert one into a Super Admin, Admin, or User account.</p>
+    <div class="form-row">
+      <div class="field"><label>Search</label><input id="emp_search" placeholder="Search by name, ID, or department" oninput="renderEmployeeDirectory()"></div>
+      <div class="field"><label>Branch</label>
+        <select id="emp_branch_filter" onchange="renderEmployeeDirectory()">
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div class="field"><label>Status</label>
+        <select id="emp_status_filter" onchange="renderEmployeeDirectory()">
+          <option value="all">All</option>
+          <option value="no_access">No System Access</option>
+          <option value="has_access">Has System Access</option>
+        </select>
+      </div>
+    </div>
+    <div id="employeeDirectoryWrap"></div>
+    <div class="status" id="emp_dir_status"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-add-branch-dept">
+    <h3>Add a Branch or Module</h3>
+    <p class="sub">Modules are display folders for pages (e.g. "Overtime", "GatePass") — new pages still need to be built and registered separately. This is NOT the same as a real organizational Department (Extruder, Weaving, etc.) — manage those in "Manage Departments &amp; Units" instead.</p>
+    <div class="form-row">
+      <div class="field">
+        <label>New Branch Name</label>
+        <input id="new_branch_name" placeholder="e.g. Zaria Plant">
+        <button style="margin-top:10px;" onclick="addBranch()">ADD BRANCH</button>
+        <div class="status" id="branch_add_status"></div>
+      </div>
+      <div class="field">
+        <label>New Module Name</label>
+        <input id="new_dept_name" placeholder="e.g. Quality Control">
+        <button style="margin-top:10px;" onclick="addDepartment()">ADD MODULE</button>
+        <div class="status" id="dept_add_status"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-manage-branch-dept">
+    <h3>Manage Branch or Module</h3>
+    <p class="sub">Click a Branch to expand it and see its mapped Modules — rename or delete either, right here</p>
+    <div id="branchDeptTreeWrap"></div>
+    <div class="status" id="branch_dept_status"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-manage-departments">
+    <h3>Manage Departments &amp; Units</h3>
+    <p class="sub">Real organizational structure — where employees actually work (e.g. Extruder, Weaving), scoped per Branch. Used by Overtime and any future feature that needs to know a person's real Department.</p>
+
+    <div class="form-row">
+      <div class="field">
+        <label>Branch</label>
+        <select id="dept_branch_select" onchange="loadDepartmentsForBranch()"></select>
+      </div>
+      <div class="field">
+        <label>New Department Name</label>
+        <input id="new_real_dept_name" placeholder="e.g. Extruder">
+        <button style="margin-top:10px;" onclick="addRealDepartment()">ADD DEPARTMENT</button>
+      </div>
+    </div>
+    <div class="status" id="real_dept_status"></div>
+
+    <div id="realDeptTreeWrap" style="margin-top:16px;"></div>
+  </div>
+
+  <div class="tab-content hidden" id="tab-branch-modules">
+    <h3>Branch Modules</h3>
+    <p class="sub">Choose a Branch, then tick the modules that Branch should have. This sets the pool of modules an Admin or User in that Branch can be given. Task Management is always on and cannot be removed.</p>
+    <label>Branch</label>
+    <select id="bm_branch" onchange="loadBranchModules()"><option value="">— select a Branch —</option></select>
+    <div id="bm_modules" style="margin-top:12px;"></div>
+    <div style="margin-top:12px;">
+      <button onclick="saveBranchModules()">SAVE BRANCH MODULES</button>
+      <button class="ghost" onclick="bmSelectAll(true)">Tick all</button>
+      <button class="ghost" onclick="bmSelectAll(false)">Untick all</button>
+    </div>
+    <div class="status" id="bm_status"></div>
+  </div>
+</div>
+
+<div class="hidden" id="createUserCard">
+  <h3>Create User Account</h3>
+  <p class="sub">Sections and pages are assigned afterward in Manage Role — a new User starts with no dashboard access until you set that up.</p>
+  <div class="field"><label>Username</label><input id="u_username" placeholder="Choose a username"></div>
+  <div class="field"><label>Password</label><input id="u_password" type="password" placeholder="Set a password"></div>
+  <button onclick="createUser()">CREATE USER</button>
+  <div class="status" id="u_status"></div>
+</div>
+
+<p class="sub hidden" id="noCreateNote">Only Super Admins and Admins can create accounts.</p>
+
+</div>
+</section>
+
+<section class="panel" id="sec-change-password">
+<h2 class="panel-head">Change Password</h2>
+<div class="details-body">
+  <div class="form-row">
+    <div class="field"><label>New Password</label><input id="new_password" type="password" placeholder="New password"></div>
+    <div class="field"><label>Confirm New Password</label><input id="confirm_password" type="password" placeholder="Repeat new password"></div>
+  </div>
+  <button onclick="changeMyPassword()">UPDATE PASSWORD</button>
+  <div class="status" id="pw_status"></div>
+</div>
+</section>
+
+<section class="panel" id="sec-manage-user">
+<h2 class="panel-head" id="listTitle">Manage Role</h2>
+<div class="details-body" id="listCard">
+  <label id="roleDropdownLabel">Select an account</label>
+  <div class="field"><label>Search (username, role, employee ID, or employee name)</label>
+    <input id="role_search" placeholder="e.g. EMP-1010, Adamu, admin" oninput="renderRoleDropdown()">
+  </div>
+  <div id="role_search_results" style="max-height:240px;overflow-y:auto;margin-bottom:10px;"></div>
+  <select id="role_account_select" class="hidden" onchange="onRoleAccountSelected()"><option value="">-- Select --</option></select>
+  <div class="role-panel hidden" id="roleDetailsPanel"></div>
+</div>
+</section>
+
+<section class="panel" id="sec-activity-log">
+<h2 class="panel-head">Activity Log</h2>
+<div class="details-body">
+  <p class="sub" id="activityScopeNote"></p>
+
+  <div class="form-row">
+    <div class="field"><label>From Date</label><input type="date" id="log_from"></div>
+    <div class="field"><label>To Date</label><input type="date" id="log_to"></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label>Action Type</label><select id="log_action_type"><option value="">All</option></select></div>
+    <div class="field"><label>Search (username or details)</label><input type="text" id="log_search" placeholder="e.g. john, deleted"></div>
+  </div>
+  <button onclick="applyActivityLogFilter()">FILTER</button>
+  <button class="btn-ok" onclick="exportActivityLogPDF()">GENERATE PDF</button>
+
+  <div id="activityWrap"></div>
+</div>
+</section>
+
+<section class="panel" id="sec-settings">
+<h2 class="panel-head">Settings</h2>
+<div class="details-body">
+  <p class="sub">Choose which Departments and pages appear on your own sidebar. This only changes what YOU see — it doesn't affect your actual access, which stays unrestricted either way.</p>
+  <div id="settings_pages_picker"></div>
+  <button onclick="saveMySidebarSettings()">SAVE</button>
+  <button class="btn-danger" onclick="resetMySidebarSettings()">SHOW EVERYTHING (RESET)</button>
+  <div class="status" id="settings_status"></div>
+</div>
+</section>
+  </div><!-- .admin-main -->
+</div><!-- .admin-shell -->
+</div>
+
+<div id="printArea"></div>
+
+<script>
+const EDGE_FUNCTION_URL = "https://betfhunzmhtdzgvufmfk.supabase.co/functions/v1/swift-handler";
+let ME = null;let ACCESS_TOKEN = null;
+let ALL_SECTIONS = [];
+let DASHBOARD_PATHS = new Set();   // module_paths that are dashboards (from the dashboards registry)
+
+async function callEdgeFunction(payload){
+  const res = await fetch(EDGE_FUNCTION_URL, {
+    method: "post",
+    headers: { "Authorization": "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){
+    console.warn("Activity log write failed (non-fatal):", e);
+  }
+}
+
+// Tab switcher: show one panel, highlight its nav item.
+function showSection(secId){
+  document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active", p.id === secId));
+  document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active", b.getAttribute("data-sec") === secId));
+  const main = document.querySelector(".admin-main");
+  if(main) main.scrollTop = 0;
+}
+window.showSection = showSection;
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    const { data: sessData, error: sessErr } = await sb.auth.getSession();
+    if(sessErr) throw new Error("Could not get session: " + sessErr.message);
+    ACCESS_TOKEN = sessData.session.access_token;
+
+    const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
+    ALL_SECTIONS = secData || [];
+
+    // Determine which pages this manager is allowed to grant onward.
+    await loadManagerAllowedPages();
+
+    // Load which module_paths are dashboards, so pickers can group them.
+    try{
+      const { data: dash } = await sb.from("dashboards").select("module_path");
+      DASHBOARD_PATHS = new Set((dash||[]).map(d=>d.module_path));
+    }catch(e){ DASHBOARD_PATHS = new Set(); }
+
+    status.style.color = "#1d8a4e";
+    status.textContent = "Connected.";
+
+    if(ME.role === "super_admin"){
+      document.getElementById("superAdminTabs").classList.remove("hidden");
+      showCreateTab("tab-create-sa");
+      document.getElementById("listTitle").textContent = "Manage Role";
+      document.getElementById("roleDropdownLabel").textContent = "Select an Admin or User";
+      await loadMySidebarSettings();
+      await loadRoleDropdown();
+      populateBranchModulesDropdown();
+      populateDeptBranchSelect();
+      await loadEmployeeDirectory();
+      // super admin: all panels available
+    } else if(ME.role === "admin"){
+      document.getElementById("createUserCard").classList.remove("hidden");
+      document.getElementById("listTitle").textContent = "Manage Role";
+      document.getElementById("roleDropdownLabel").textContent = "Select a User you created";
+      await loadRoleDropdown();
+      // admin: no Settings panel
+      document.getElementById("sec-settings").classList.add("role-unavailable");
+    } else {
+      document.getElementById("noCreateNote").classList.remove("hidden");
+      // user: no create, no manage-role, no settings
+      document.getElementById("sec-create-user").classList.add("role-unavailable");
+      document.getElementById("sec-manage-user").classList.add("role-unavailable");
+      document.getElementById("sec-settings").classList.add("role-unavailable");
+    }
+
+    const scopeNote = document.getElementById("activityScopeNote");
+    scopeNote.textContent = ME.role === "super_admin" ? "Showing all activity, system-wide."
+      : ME.role === "admin" ? "Showing your own actions and the actions of Users you created."
+      : "Showing only your own activity.";
+    await loadActivityLog();
+
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("section");
+    const sectionIdMap = {
+      "create-user": "sec-create-user", "change-password": "sec-change-password",
+      "manage-user": "sec-manage-user", "activity-log": "sec-activity-log", "settings": "sec-settings"
+    };
+    // Which sections are available to this role (nav items for the rest are hidden).
+    const availeSecs = [];
+    document.querySelectorAll(".nav-item").forEach(btn=>{
+      const secId = btn.getAttribute("data-sec");
+      const sec = document.getElementById(secId);
+      const usable = sec && !sec.classList.contains("role-unavailable");
+      btn.style.display = usable ? "" : "none";
+      if(usable) availeSecs.push(secId);
+    });
+
+    let targetId = wanted && sectionIdMap[wanted] ? sectionIdMap[wanted] : null;
+    if(!targetId || availeSecs.indexOf(targetId) === -1){
+      targetId = availeSecs.indexOf("sec-change-password") !== -1 ? "sec-change-password" : availeSecs[0];
+    }
+    if(targetId) showSection(targetId);
+  }catch(e){
+    status.style.color = "#c0392b";
+    status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+// =========================================================
+// BRANCH / DEPARTMENT (Super Admin only)
+// =========================================================
+function showCreateTab(tabId){
+  document.querySelectorAll(".tab-content").forEach(el=>el.classList.add("hidden"));
+  document.querySelectorAll(".tab-btn").forEach(el=>el.classList.remove("active"));
+  document.getElementById(tabId).classList.remove("hidden");
+  document.getElementById("tabbtn-" + tabId.replace("tab-", "")).classList.add("active");
+  if(tabId === "tab-manage-branch-dept"){
+    loadBranchDeptTree();
+  }
+}
+
+async function loadBranchDeptTree(){
+  const wrap = document.getElementById("branchDeptTreeWrap");
+  wrap.innerHTML = "Loading...";
+
+  const [secRes, mapRes] = await Promise.all([
+    sb.from("app_sections").select("id,name").order("name"),
+    sb.from("page_sections").select("section_id, pages(module_id, modules(id,name))")
+  ]);
+  if(secRes.error){ wrap.innerHTML = "Error: " + secRes.error.message; return; }
+  if(mapRes.error){ wrap.innerHTML = "Error: " + mapRes.error.message; return; }
+
+  const deptsBySection = {};
+  (mapRes.data||[]).forEach(r=>{
+    const dept = r.pages && r.pages.modules ? r.pages.modules : null;
+    if(!dept) return;
+    if(!deptsBySection[r.section_id]) deptsBySection[r.section_id] = new Map();
+    deptsBySection[r.section_id].set(dept.id, dept.name);
+  });
+
+  const branches = secRes.data || [];
+  if(!branches.length){ wrap.innerHTML = "<p class='sub'>No Branches yet.</p>"; return; }
+
+  let html = "";
+  branches.forEach(b=>{
+    const depts = deptsBySection[b.id] ? [...deptsBySection[b.id].entries()].sort((a,b2)=>a[1].localeCompare(b2[1])) : [];
+    html += `<details class="branch-block">
+      <summary onclick="event.stopPropagation()">
+        <input id="branch_head_${b.id}" value="${b.name}" onclick="event.stopPropagation()">
+        <button class="mini-btn" onclick="event.stopPropagation(); renameBranch(${b.id})">💾 Save</button>
+        <button class="mini-btn" onclick="event.stopPropagation(); deleteBranch(${b.id}, document.getElementById('branch_head_${b.id}').value)">🗑️ Delete</button>
+      </summary>
+      <div class="dept-rows">`;
+    if(!depts.length){
+      html += `<p class="sub">No Departments mapped to this Branch yet.</p>`;
+    } else {
+      depts.forEach(([deptId, deptName])=>{
+        const cellId = "dept_" + deptId + "_in_" + b.id;
+        html += `<div class="dept-row">
+          <input id="${cellId}" value="${deptName}">
+          <button class="mini-btn" onclick="renameDepartment(${deptId}, '${cellId}')">💾 Save</button>
+          <button class="mini-btn" onclick="deleteDepartment(${deptId}, document.getElementById('${cellId}').value)">🗑️ Delete</button>
+        </div>`;
+      });
+    }
+    html += `</div></details>`;
+  });
+  wrap.innerHTML = html;
+}
+
+async function renameBranch(id){
+  const status = document.getElementById("branch_dept_status");
+  const newName = document.getElementById("branch_head_" + id).value.trim();
+  if(!newName){ status.className="status err"; status.textContent="Branch name cannot be empty."; return; }
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { error } = await sb.from("app_sections").update({ name: newName }).eq("id", id);
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Branch renamed.";
+    await logActivity("branch_renamed", ME.username + " renamed a Branch to \"" + newName + "\"");
+    const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
+    ALL_SECTIONS = secData || [];
+    await loadBranchDeptTree();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function renameDepartment(id, cellId){
+  const status = document.getElementById("branch_dept_status");
+  const newName = document.getElementById(cellId).value.trim();
+  if(!newName){ status.className="status err"; status.textContent="Department name cannot be empty."; return; }
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { error } = await sb.from("modules").update({ name: newName }).eq("id", id);
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Department renamed.";
+    await logActivity("department_renamed", ME.username + " renamed a Department to \"" + newName + "\"");
+    await loadBranchDeptTree();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function addBranch(){
+  const status = document.getElementById("branch_add_status");
+  const name = document.getElementById("new_branch_name").value.trim();
+  if(!name){ status.className="status err"; status.textContent="Enter a branch name."; return; }
+
+  status.className = "status"; status.textContent = "Adding...";
+  try{
+    const { data: inserted, error } = await sb.from("app_sections").insert({ name }).select("id,name").single();
+    if(error) throw error;
+    // Always give a brand-new branch the compulsory Task Management pages.
+    await ensureTaskManagement(inserted.id);
+    status.className = "status ok"; status.textContent = "✅ Branch added (Task Management enabled). Use the Branch Modules tab to add more.";
+    document.getElementById("new_branch_name").value = "";
+    await logActivity("branch_added", ME.username + " added Branch \"" + name + "\"");
+    const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
+    ALL_SECTIONS = secData || [];
+    populateBranchModulesDropdown();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// ---- Branch Modules manager ----
+const TASK_MANAGEMENT_PATHS = ["todo/assign-task","todo/view-tasks","todo/my-tasks","todo/todo-settings","todo/view-completed"];
+let BM_ALL_PAGES = [];   // [{id, name, module_path, dept}]
+let BM_MAPPED = new Set(); // page_ids currently mapped to selected branch
+
+// Ensure the given section has all Task Management pages mapped.
+async function ensureTaskManagement(sectionId){
+  const { data: tmPages } = await sb.from("pages").select("id, module_path").in("module_path", TASK_MANAGEMENT_PATHS);
+  if(!tmPages || !tmPages.length) return;
+  const { data: existing } = await sb.from("page_sections").select("page_id").eq("section_id", sectionId);
+  const have = new Set((existing||[]).map(r=>r.page_id));
+  const toAdd = tmPages.filter(p=>!have.has(p.id)).map(p=>({ page_id: p.id, section_id: sectionId }));
+  if(toAdd.length){ await sb.from("page_sections").insert(toAdd); }
+}
+
+function populateBranchModulesDropdown(){
+  const sel = document.getElementById("bm_branch");
+  if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select a Branch —</option>' +
+    ALL_SECTIONS.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  if(prev) sel.value = prev;
+}
+
+async function loadBranchModules(){
+  const status = document.getElementById("bm_status");
+  const wrap = document.getElementById("bm_modules");
+  const sectionId = Number(document.getElementById("bm_branch").value);
+  if(!sectionId){ wrap.innerHTML = ""; status.textContent = ""; return; }
+
+  status.className="status"; status.textContent="Loading...";
+  try{
+    // all registered pages
+    const { data: pages, error: pErr } = await sb.from("pages").select("id, name, module_path, modules(name)").order("name");
+    if(pErr) throw pErr;
+    BM_ALL_PAGES = (pages||[]).map(p=>({ id:p.id, name:p.name, module_path:p.module_path, dept: p.modules? p.modules.name : "(Unassigned)" }));
+
+    // currently mapped for this branch
+    const { data: mapped } = await sb.from("page_sections").select("page_id").eq("section_id", sectionId);
+    BM_MAPPED = new Set((mapped||[]).map(r=>r.page_id));
+
+    // render: dashboards group first, then departments
+    const renderItem = (p)=>{
+      const isTM = TASK_MANAGEMENT_PATHS.indexOf(p.module_path) !== -1;
+      const checked = (BM_MAPPED.has(p.id) || isTM) ? "checked" : "";
+      const locked = isTM ? "disabled title='Task Management is compulsory'" : "";
+      return `<label><input type="checkbox" class="bm-check" value="${p.id}" data-tm="${isTM?1:0}" ${checked} ${locked}> ${p.name}${isTM?" <span style='color:#6b7280;font-size:11px;'>(always on)</span>":""}</label>`;
+    };
+
+    const dashItems = BM_ALL_PAGES.filter(p=>DASHBOARD_PATHS.has(p.module_path)).sort((a,b)=>a.name.localeCompare(b.name));
+    const byDept = {};
+    BM_ALL_PAGES.forEach(p=>{ if(DASHBOARD_PATHS.has(p.module_path)) return; if(!byDept[p.dept]) byDept[p.dept]=[]; byDept[p.dept].push(p); });
+
+    let html = "";
+    if(dashItems.length){
+      html += `<details class="page-group" open><summary class="page-group-title">📊 Dashboards</summary><div class="checks">`;
+      dashItems.forEach(p=>{ html += renderItem(p); });
+      html += "</div></details>";
+    }
+    Object.keys(byDept).sort().forEach(dept=>{
+      const list = byDept[dept].sort((a,b)=>a.name.localeCompare(b.name));
+      html += `<details class="page-group" open><summary class="page-group-title">${dept}</summary><div class="checks">`;
+      list.forEach(p=>{ html += renderItem(p); });
+      html += "</div></details>";
+    });
+    wrap.innerHTML = html;
+    status.className="status ok"; status.textContent = BM_ALL_PAGES.length + " module(s) shown.";
+  }catch(e){
+    status.className="status err"; status.textContent="❌ "+e.message;
+  }
+}
+
+function bmSelectAll(on){
+  document.querySelectorAll("#bm_modules .bm-check").forEach(c=>{ if(c.getAttribute("data-tm")==="1") return; c.checked = on; });
+}
+
+async function saveBranchModules(){
+  const status = document.getElementById("bm_status");
+  const sectionId = Number(document.getElementById("bm_branch").value);
+  if(!sectionId){ status.className="status err"; status.textContent="Select a Branch first."; return; }
+
+  // desired = ticked boxes + always Task Management pages
+  const desired = new Set();
+  document.querySelectorAll("#bm_modules .bm-check:checked").forEach(c=>desired.add(Number(c.value)));
+  BM_ALL_PAGES.forEach(p=>{ if(TASK_MANAGEMENT_PATHS.indexOf(p.module_path)!==-1) desired.add(p.id); });
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    // to add: desired not currently mapped
+    const toAdd = [...desired].filter(id=>!BM_MAPPED.has(id)).map(id=>({ page_id:id, section_id:sectionId }));
+    // to remove: currently mapped but no longer desired
+    const toRemove = [...BM_MAPPED].filter(id=>!desired.has(id));
+
+    if(toAdd.length){ const { error } = await sb.from("page_sections").insert(toAdd); if(error) throw error; }
+    if(toRemove.length){ const { error } = await sb.from("page_sections").delete().eq("section_id", sectionId).in("page_id", toRemove); if(error) throw error; }
+
+    await logActivity("branch_modules_updated", ME.username + " updated modules for a Branch (+" + toAdd.length + ", -" + toRemove.length + ")");
+    status.className="status ok"; status.textContent="✅ Saved. Added "+toAdd.length+", removed "+toRemove.length+".";
+    await loadBranchModules();
+  }catch(e){
+    status.className="status err"; status.textContent="❌ "+e.message;
+  }
+}
+
+async function addDepartment(){
+  const status = document.getElementById("dept_add_status");
+  const name = document.getElementById("new_dept_name").value.trim();
+  if(!name){ status.className="status err"; status.textContent="Enter a module name."; return; }
+
+  status.className = "status"; status.textContent = "Adding...";
+  try{
+    const { error } = await sb.from("modules").insert({ name });
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Module added. Register its pages once its screens are built.";
+    document.getElementById("new_dept_name").value = "";
+    await logActivity("module_added", ME.username + " added Module \"" + name + "\"");
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// =========================================================
+// REAL DEPARTMENTS & UNITS — the actual organizational
+// structure (Branch -> Department -> Unit), completely
+// separate from the Module system above. Used by Overtime
+// and any future feature needing a person's real Department.
+// =========================================================
+let REAL_DEPTS_FOR_BRANCH = []; // [{id, name, units:[{id,name}]}]
+
+function populateDeptBranchSelect(){
+  const sel = document.getElementById("dept_branch_select");
+  if(!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select a Branch —</option>' +
+    ALL_SECTIONS.map(s=>`<option value="${s.name}">${s.name}</option>`).join("");
+  if(prev) sel.value = prev;
+}
+
+async function loadDepartmentsForBranch(){
+  const wrap = document.getElementById("realDeptTreeWrap");
+  const branch = document.getElementById("dept_branch_select").value;
+  if(!branch){ wrap.innerHTML = ""; return; }
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    const { data: depts, error: dErr } = await sb.from("departments").select("id, name").eq("section", branch).order("name");
+    if(dErr) throw dErr;
+
+    const deptIds = (depts||[]).map(d=>d.id);
+    let unitsByDept = {};
+    if(deptIds.length){
+      const { data: units } = await sb.from("units").select("id, name, department_id").in("department_id", deptIds).order("name");
+      (units||[]).forEach(u=>{ if(!unitsByDept[u.department_id]) unitsByDept[u.department_id]=[]; unitsByDept[u.department_id].push(u); });
+    }
+
+    REAL_DEPTS_FOR_BRANCH = (depts||[]).map(d=>({ ...d, units: unitsByDept[d.id]||[] }));
+
+    if(!REAL_DEPTS_FOR_BRANCH.length){ wrap.innerHTML = "<p class='sub'>No Departments yet for " + branch + ".</p>"; return; }
+
+    let html = "";
+    REAL_DEPTS_FOR_BRANCH.forEach(d=>{
+      html += `<details class="branch-block">
+        <summary onclick="event.stopPropagation()">
+          <input id="realdept_head_${d.id}" value="${d.name}" onclick="event.stopPropagation()">
+          <button class="mini-btn" onclick="event.stopPropagation(); renameRealDepartment(${d.id})">💾 Save</button>
+          <button class="mini-btn" onclick="event.stopPropagation(); deleteRealDepartment(${d.id}, '${d.name.replace(/'/g,"\\\\'")}')">🗑️ Delete</button>
+        </summary>
+        <div style="padding:10px 14px;">
+          <label style="font-size:12px;">Units in ${d.name}</label>
+          <div>`;
+      d.units.forEach(u=>{
+        html += `<span class="chip">${u.name}<button onclick="deleteUnit(${u.id})" title="Remove">&times;</button></span>`;
+      });
+      html += `</div>
+          <input id="new_unit_${d.id}" placeholder="New unit name" style="width:200px;display:inline-block;margin-top:8px;">
+          <button class="mini-btn" onclick="addUnit(${d.id})">+ Add Unit</button>
+        </div>
+      </details>`;
+    });
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:#c0392b;'>❌ " + e.message + "</p>";
+  }
+}
+
+async function addRealDepartment(){
+  const status = document.getElementById("real_dept_status");
+  const branch = document.getElementById("dept_branch_select").value;
+  const name = document.getElementById("new_real_dept_name").value.trim();
+  if(!branch){ status.className="status err"; status.textContent="Select a Branch first."; return; }
+  if(!name){ status.className="status err"; status.textContent="Enter a Department name."; return; }
+
+  status.className = "status"; status.textContent = "Adding...";
+  try{
+    const { error } = await sb.from("departments").insert({ section: branch, name });
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Department added.";
+    document.getElementById("new_real_dept_name").value = "";
+    await logActivity("real_department_added", ME.username + " added Department \"" + name + "\" to " + branch);
+    await loadDepartmentsForBranch();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ That Department already exists for this Branch." : "❌ " + e.message;
+  }
+}
+
+async function renameRealDepartment(id){
+  const status = document.getElementById("real_dept_status");
+  const newName = document.getElementById("realdept_head_" + id).value.trim();
+  if(!newName){ status.className="status err"; status.textContent="Department name cannot be empty."; return; }
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { error } = await sb.from("departments").update({ name: newName }).eq("id", id);
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Department renamed.";
+    await logActivity("real_department_renamed", ME.username + " renamed a Department to \"" + newName + "\"");
+    await loadDepartmentsForBranch();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function deleteRealDepartment(id, name){
+  if(!confirm("Delete Department \"" + name + "\"?\n\nThis also removes any Units under it.")) return;
+  const status = document.getElementById("real_dept_status");
+  try{
+    const { error } = await sb.from("departments").delete().eq("id", id);
+    if(error) throw error;
+    await logActivity("real_department_deleted", ME.username + " deleted Department \"" + name + "\"");
+    await loadDepartmentsForBranch();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function addUnit(departmentId){
+  const status = document.getElementById("real_dept_status");
+  const input = document.getElementById("new_unit_" + departmentId);
+  const name = input.value.trim();
+  if(!name){ status.className="status err"; status.textContent="Enter a unit name."; return; }
+
+  try{
+    const { error } = await sb.from("units").insert({ department_id: departmentId, name });
+    if(error) throw error;
+    input.value = "";
+    await logActivity("unit_added", ME.username + " added Unit \"" + name + "\"");
+    await loadDepartmentsForBranch();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1 ? "❌ That Unit already exists in this Department." : "❌ " + e.message;
+  }
+}
+
+async function deleteUnit(id){
+  if(!confirm("Remove this Unit?")) return;
+  const status = document.getElementById("real_dept_status");
+  try{
+    const { error } = await sb.from("units").delete().eq("id", id);
+    if(error) throw error;
+    await logActivity("unit_deleted", ME.username + " removed a Unit");
+    await loadDepartmentsForBranch();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function deleteBranch(id, name){
+  if(!confirm("Delete Branch \"" + name + "\"?\n\nThis will fail if any account is still assigned to it.")) return;
+  try{
+    const { error } = await sb.from("app_sections").delete().eq("id", id);
+    if(error) throw error;
+    await logActivity("branch_deleted", ME.username + " deleted Branch \"" + name + "\"");
+    const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
+    ALL_SECTIONS = secData || [];
+    await loadBranchDeptTree();
+  }catch(e){
+    alert("❌ " + e.message + "\n\nThis Branch is likely still assigned to an account.");
+  }
+}
+
+async function deleteDepartment(id, name){
+  if(!confirm("Delete Department \"" + name + "\"?\n\nThis will fail if it still has pages registered under it.")) return;
+  try{
+    const { error } = await sb.from("modules").delete().eq("id", id);
+    if(error) throw error;
+    await logActivity("department_deleted", ME.username + " deleted Department \"" + name + "\"");
+    await loadBranchDeptTree();
+  }catch(e){
+    alert("❌ " + e.message + "\n\nThis Department is likely still holding registered pages.");
+  }
+}
+
+// =========================================================
+// PAGES PICKER — pages within ONE given Section, grouped by Department,
+// as clickable/collapsible checkboxes.
+// =========================================================
+// =========================================================
+// SUPER ADMIN'S OWN SIDEBAR SETTINGS — purely a personal display
+// preference. Reuses assigned_pages against the Super Admin's own
+// profile: if they have any rows there, the sidebar shows only those;
+// if they have none (never customized, or reset), it shows everything,
+// exactly like today. Their actual access is never restricted by this.
+// =========================================================
+async function renderAllPagesPicker(containerId, checkedPageIds){
+  const container = document.getElementById(containerId);
+  const { data, error } = await sb.from("pages").select("id, name, module_path, module_id, modules(name)").order("name");
+  if(error){ container.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ container.innerHTML = "<p class='sub'>No pages registered yet.</p>"; return; }
+
+  const dashItems = [];
+  const byDept = {};
+  data.forEach(p=>{
+    if(DASHBOARD_PATHS.has(p.module_path)){ dashItems.push(p); return; }
+    const deptName = p.modules ? p.modules.name : "(Unassigned)";
+    if(!byDept[deptName]) byDept[deptName] = [];
+    byDept[deptName].push(p);
+  });
+
+  let html = "";
+
+  if(dashItems.length){
+    dashItems.sort((a,b)=>a.name.localeCompare(b.name));
+    const anyChecked = dashItems.some(p=>checkedPageIds.indexOf(p.id) !== -1);
+    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">📊 Dashboards</summary><div class="checks">`;
+    dashItems.forEach(p=>{
+      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
+      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
+    });
+    html += "</div></details>";
+  }
+
+  Object.keys(byDept).sort().forEach(deptName=>{
+    const pagesInDept = byDept[deptName].sort((a,b)=>a.name.localeCompare(b.name));
+    const anyChecked = pagesInDept.some(p=>checkedPageIds.indexOf(p.id) !== -1);
+    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">${deptName}</summary><div class="checks">`;
+    pagesInDept.forEach(p=>{
+      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
+      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
+    });
+    html += "</div></details>";
+  });
+  container.innerHTML = html;
+}
+
+async function loadMySidebarSettings(){
+  const { data } = await sb.from("assigned_pages").select("page_id").eq("profile_id", ME.id);
+  const checkedPageIds = (data||[]).map(r=>r.page_id);
+  await renderAllPagesPicker("settings_pages_picker", checkedPageIds);
+}
+
+async function saveMySidebarSettings(){
+  const status = document.getElementById("settings_status");
+  const pageIds = Array.from(document.querySelectorAll("#settings_pages_picker .page-check:checked")).map(el=>Number(el.value));
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { error: delErr } = await sb.from("assigned_pages").delete().eq("profile_id", ME.id);
+    if(delErr) throw delErr;
+    if(pageIds.length){
+      const rows = pageIds.map(p=>({ profile_id: ME.id, page_id: p }));
+      const { error: insErr } = await sb.from("assigned_pages").insert(rows);
+      if(insErr) throw insErr;
+    }
+    status.className = "status ok";
+    status.textContent = pageIds.length
+      ? "✅ Saved. Your sidebar will now show only the " + pageIds.length + " page(s) you ticked."
+      : "✅ Saved with nothing ticked — your sidebar will show everything, same as Reset.";
+    await logActivity("sidebar_settings_saved", ME.username + " customized their own sidebar (" + pageIds.length + " page(s) shown)");
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function resetMySidebarSettings(){
+  const status = document.getElementById("settings_status");
+  if(!confirm("Show everything on your sidebar again? This clears your current customization.")) return;
+
+  status.className = "status"; status.textContent = "Resetting...";
+  try{
+    const { error } = await sb.from("assigned_pages").delete().eq("profile_id", ME.id);
+    if(error) throw error;
+    status.className = "status ok"; status.textContent = "✅ Reset. Your sidebar will show everything again.";
+    await logActivity("sidebar_settings_reset", ME.username + " reset their sidebar to show everything");
+    await loadMySidebarSettings();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// Cache of the managing Admin's own granted page IDs. An Admin can only
+// pass on pages they themselves were granted. null = Super Admin (no limit).
+let MANAGER_ALLOWED_PAGE_IDS = null;
+async function loadManagerAllowedPages(){
+  if(ME.role === "super_admin"){ MANAGER_ALLOWED_PAGE_IDS = null; return; }
+  const { data } = await sb.from("assigned_pages").select("page_id").eq("profile_id", ME.id);
+  MANAGER_ALLOWED_PAGE_IDS = new Set((data||[]).map(r=>r.page_id));
+}
+
+async function renderPagesPicker(containerId, checkedPageIds, sectionId){
+  const container = document.getElementById(containerId);
+  if(!sectionId){ container.innerHTML = ""; return; }
+
+  const { data, error } = await sb
+    .from("page_sections")
+    .select("page_id, pages(id, name, module_path, module_id, modules(name))")
+    .eq("section_id", sectionId);
+
+  if(error){ container.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ container.innerHTML = "<p class='sub'>No pages available for this Section yet.</p>"; return; }
+
+  const byDept = {};
+  data.forEach(r=>{
+    const p = r.pages;
+    if(!p) return;
+    // If the manager is an Admin, only offer pages the Admin themselves holds.
+    if(MANAGER_ALLOWED_PAGE_IDS && !MANAGER_ALLOWED_PAGE_IDS.has(p.id)) return;
+    const deptName = p.modules ? p.modules.name : "(Unassigned)";
+    if(!byDept[deptName]) byDept[deptName] = [];
+    byDept[deptName].push(p);
+  });
+
+  if(!Object.keys(byDept).length){ container.innerHTML = "<p class='sub'>You have no modules in this Section that you can grant.</p>"; return; }
+
+  // Collect dashboards separately from normal pages.
+  const dashItems = [];
+  Object.keys(byDept).forEach(dept=>{
+    byDept[dept] = byDept[dept].filter(p=>{
+      if(DASHBOARD_PATHS.has(p.module_path)){ dashItems.push(p); return false; }
+      return true;
+    });
+    if(!byDept[dept].length) delete byDept[dept];
+  });
+
+  let html = "";
+
+  // Dashboards group first.
+  if(dashItems.length){
+    dashItems.sort((a,b)=>a.name.localeCompare(b.name));
+    const anyChecked = dashItems.some(p=>checkedPageIds.indexOf(p.id) !== -1);
+    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">📊 Dashboards</summary><div class="checks">`;
+    dashItems.forEach(p=>{
+      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
+      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
+    });
+    html += "</div></details>";
+  }
+
+  // Then normal department groups.
+  Object.keys(byDept).sort().forEach(deptName=>{
+    const pagesInDept = byDept[deptName].sort((a,b)=>a.name.localeCompare(b.name));
+    const anyChecked = pagesInDept.some(p=>checkedPageIds.indexOf(p.id) !== -1);
+    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">${deptName}</summary><div class="checks">`;
+    pagesInDept.forEach(p=>{
+      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
+      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
+    });
+    html += "</div></details>";
+  });
+  container.innerHTML = html;
+}
+
+// =========================================================
+// SECTIONS + PAGES PICKER (used by Create User and Manage Role for a User
+// target) — tick a Section, then its pages appear nested underneath.
+// =========================================================
+async function renderSectionsWithPages(containerId, availableSectionIds, checkedSectionIds, checkedPageIds){
+  const container = document.getElementById(containerId);
+  const sections = ALL_SECTIONS.filter(s => availableSectionIds.indexOf(s.id) !== -1);
+
+  if(!sections.length){
+    container.innerHTML = "<p class='sub'>No Sections available yet.</p>";
+    return;
+  }
+
+  let html = "";
+  sections.forEach(s=>{
+    const checked = checkedSectionIds.indexOf(s.id) !== -1 ? "checked" : "";
+    html += `<div class="section-block">
+      <label><input type="checkbox" class="section-check" value="${s.id}" ${checked} onchange="toggleSectionPages(${s.id},'${containerId}')"> ${s.name}</label>
+      <div id="secpages_${containerId}_${s.id}" class="${checked?'':'hidden'}"></div>
+    </div>`;
+  });
+  container.innerHTML = html;
+
+  for(const s of sections){
+    if(checkedSectionIds.indexOf(s.id) !== -1){
+      await renderPagesPicker("secpages_" + containerId + "_" + s.id, checkedPageIds, s.id);
+    }
+  }
+}
+
+async function toggleSectionPages(sectionId, containerId){
+  const wrapId = "secpages_" + containerId + "_" + sectionId;
+  const wrap = document.getElementById(wrapId);
+  const checkbox = document.querySelector("#" + containerId + " .section-check[value='" + sectionId + "']");
+  if(checkbox.checked){
+    wrap.classList.remove("hidden");
+    await renderPagesPicker(wrapId, [], sectionId);
+  } else {
+    wrap.classList.add("hidden");
+    wrap.innerHTML = "";
+  }
+}
+
+function getCheckedSectionsAndPages(containerId){
+  const sectionIds = Array.from(document.querySelectorAll("#" + containerId + " .section-check:checked")).map(el=>Number(el.value));
+  const pageIds = Array.from(document.querySelectorAll("#" + containerId + " .page-check:checked")).map(el=>Number(el.value));
+  return { sectionIds, pageIds };
+}
+
+// =========================================================
+// SECTIONS-ONLY PICKER (used for an Admin target — no page ticking,
+// since an Admin auto-inherits every page within their assigned Sections)
+// =========================================================
+function renderSectionsOnly(containerId, checkedSectionIds){
+  const container = document.getElementById(containerId);
+  container.innerHTML = ALL_SECTIONS.map(s=>{
+    const checked = checkedSectionIds.indexOf(s.id) !== -1 ? "checked" : "";
+    return `<label class="checks" style="display:inline-flex;"><input type="checkbox" class="admin-section-check" value="${s.id}" ${checked}> ${s.name}</label>`;
+  }).join(" ");
+}
+
+function getCheckedAdminSections(containerId){
+  return Array.from(document.querySelectorAll("#" + containerId + " .admin-section-check:checked")).map(el=>Number(el.value));
+}
+
+// =========================================================
+// CREATE ACCOUNTS
+// =========================================================
+async function createSuperAdmin(){
+  const status = document.getElementById("sa_status");
+  const username = document.getElementById("sa_username").value.trim();
+  const email = document.getElementById("sa_email").value.trim();
+  const password = document.getElementById("sa_password").value;
+  const super_admin_type = document.getElementById("sa_type").value;
+
+  if(!username || !email || !password){ status.className="status err"; status.textContent="Fill in username, email, and password."; return; }
+  if(!confirm("Create a new Super Admin account for \"" + username + "\" (" + email + ")?\n\nThis is the highest-privilege tier in the system.")) return;
+
+  status.className = "status"; status.textContent = "Creating...";
+  try{
+    const res = await callEdgeFunction({ action:"create_super_admin", username, email, password, super_admin_type });
+    status.className = "status ok"; status.textContent = "✅ " + res.message;
+    document.getElementById("sa_username").value = ""; document.getElementById("sa_email").value = ""; document.getElementById("sa_password").value = "";
+    await logActivity("super_admin_created", ME.username + " created Super Admin account \"" + username + "\" (" + super_admin_type + ")");
+    await linkPendingEmployeeIfAny(res.id);
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function createAdmin(){
+  const status = document.getElementById("a_status");
+  const username = document.getElementById("a_username").value.trim();
+  const password = document.getElementById("a_password").value;
+
+  if(!username || !password){ status.className="status err"; status.textContent="Enter a username and password."; return; }
+
+  status.className = "status"; status.textContent = "Creating...";
+  try{
+    const res = await callEdgeFunction({ action:"create_admin", username, password });
+    status.className = "status ok"; status.textContent = "✅ " + res.message;
+    document.getElementById("a_username").value = ""; document.getElementById("a_password").value = "";
+    await logActivity("admin_created", ME.username + " created Admin account \"" + username + "\"");
+    await loadRoleDropdown();
+    await linkPendingEmployeeIfAny(res.id);
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function createUser(){
+  const status = document.getElementById("u_status");
+  const username = document.getElementById("u_username").value.trim();
+  const password = document.getElementById("u_password").value;
+
+  if(!username || !password){ status.className="status err"; status.textContent="Enter a username and password."; return; }
+
+  status.className = "status"; status.textContent = "Creating...";
+  try{
+    const res = await callEdgeFunction({ action:"create_user", username, password });
+    status.className = "status ok"; status.textContent = "✅ " + res.message;
+    document.getElementById("u_username").value = ""; document.getElementById("u_password").value = "";
+    await logActivity("user_created", ME.username + " created User account \"" + username + "\"");
+    await loadRoleDropdown();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// =========================================================
+// EMPLOYEE DIRECTORY (Super Admin only) — browse employees, grant
+// system access to convert one into an account.
+// =========================================================
+let EMPLOYEES = [];
+let BRANCH_OPTIONS = [];
+let PENDING_EMPLOYEE = null; // set by grantAccessFromEmployee, consumed after account creation succeeds
+
+async function loadEmployeeDirectory(){
+  const status = document.getElementById("emp_dir_status");
+  if(status) status.textContent = "Loading…";
+  try{
+    const { data: emps, error: empErr } = await sb.from("employees").select("*").order("full_name");
+    if(empErr) throw empErr;
+    const { data: sals } = await sb.from("employee_salaries").select("*");
+    const salaryMap = {};
+    (sals||[]).forEach(s=> salaryMap[s.employee_id] = s.salary);
+
+    // Fetch the current role for every linked account so Employee Directory
+    // can offer a Change Role control instead of just a static "Has Access" badge.
+    const linkedIds = (emps||[]).map(e=>e.linked_profile_id).filter(Boolean);
+    let roleMap = {};
+    if(linkedIds.length){
+      const { data: profs } = await sb.from("profiles").select("id, role").in("id", linkedIds);
+      (profs||[]).forEach(p=>{ roleMap[p.id] = p.role; });
+    }
+
+    EMPLOYEES = (emps||[]).map(e=>({
+      ...e,
+      salary: salaryMap[e.id],
+      linked_role: e.linked_profile_id ? (roleMap[e.linked_profile_id] || null) : null
+    }));
+
+    // Load the known Branch list once, for both the filter dropdown and the
+    // per-row inline edit control.
+    if(!BRANCH_OPTIONS.length){
+      const { data: sections } = await sb.from("app_sections").select("name").order("name");
+      BRANCH_OPTIONS = (sections||[]).map(s=>s.name);
+    }
+    const branchFilter = document.getElementById("emp_branch_filter");
+    if(branchFilter && branchFilter.options.length <= 1){
+      branchFilter.innerHTML = '<option value="all">All</option>' +
+        BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join("") +
+        '<option value="__unset__">— Not set —</option>';
+    }
+
+    if(status) status.textContent = "";
+    renderEmployeeDirectory();
+  }catch(e){
+    if(status) status.textContent = "Could not load employees: " + (e.message||e);
+  }
+}
+
+function renderEmployeeDirectory(){
+  const wrap = document.getElementById("employeeDirectoryWrap");
+  if(!wrap) return;
+  const qEl = document.getElementById("emp_search");
+  const fEl = document.getElementById("emp_status_filter");
+  const bEl = document.getElementById("emp_branch_filter");
+  const q = qEl ? qEl.value.trim().toLowerCase() : "";
+  const statusFilter = fEl ? fEl.value : "all";
+  const branchFilter = bEl ? bEl.value : "all";
+
+  const rows = EMPLOYEES.filter(e=>{
+    if(statusFilter === "no_access" && e.has_system_access) return false;
+    if(statusFilter === "has_access" && !e.has_system_access) return false;
+    if(branchFilter === "__unset__" && e.branch) return false;
+    if(branchFilter !== "all" && branchFilter !== "__unset__" && e.branch !== branchFilter) return false;
+    if(q){
+      const hay = (e.full_name + " " + e.employee_id + " " + (e.department||"")).toLowerCase();
+      if(hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  let html = "<table><tr><th>ID</th><th>Name</th><th>Branch</th><th>Department</th><th>Unit</th><th>Salary (\u20a6)</th><th>Access</th><th>Action</th></tr>";
+  rows.forEach(e=>{
+    const salaryText = (e.salary !== undefined && e.salary !== null) ? Number(e.salary).toLocaleString() : "\u2014";
+    const branchOptionsHtml = '<option value="">— none —</option>' +
+      BRANCH_OPTIONS.map(b=>`<option value="${b}" ${e.branch===b?"selected":""}>${b}</option>`).join("");
+    html += "<tr><td>" + e.employee_id + "</td><td>" + e.full_name + "</td>" +
+      "<td><select id=\"branch_pick_" + e.id + "\" style=\"width:auto;\" onchange=\"setEmployeeBranch(" + e.id + ", this.value)\">" + branchOptionsHtml + "</select></td>" +
+      "<td>" + (e.department||"") + "</td>" +
+      "<td>" + (e.unit||"") + "</td><td>" + salaryText + "</td>";
+
+    if(e.has_system_access){
+      html += "<td><span class=\"badge\">" + (e.linked_role || "access") + "</span></td><td>";
+      if(e.linked_role === "super_admin" || !e.linked_profile_id){
+        // Super Admin roles are never changed through this control — same
+        // protection the system already applies to delete/reset actions.
+        // Accounts with no resolvable profile id also can't be edited here.
+        html += "\u2014";
+      } else {
+        const otherRoles = ["user","admin","super_admin"].filter(r=>r !== e.linked_role);
+        html += "<select id=\"chg_role_" + e.id + "\" style=\"width:auto;display:inline-block;margin:0 6px 0 0;\">" +
+          otherRoles.map(r=>"<option value=\"" + r + "\">" + r + "</option>").join("") +
+          "</select>" +
+          "<button style=\"margin:0;padding:6px 10px;\" onclick=\"changeEmployeeRole(" + e.id + ",'" + e.linked_profile_id + "','" + e.linked_role + "')\">Change Role</button>";
+      }
+      html += "</td>";
+    } else {
+      html += "<td>\u2014</td><td>" +
+        "<select id=\"role_pick_" + e.id + "\" style=\"width:auto;display:inline-block;margin:0 6px 0 0;\">" +
+        "<option value=\"super_admin\">Super Admin</option>" +
+        "<option value=\"admin\">Admin</option>" +
+        "<option value=\"user\" selected>User</option>" +
+        "</select>" +
+        "<button style=\"margin:0;padding:6px 10px;\" onclick=\"grantAccessFromEmployee(" + e.id + ")\">Grant Access</button>" +
+        "</td>";
+    }
+    html += "</tr>";
+  });
+  html += "</table>";
+  wrap.innerHTML = rows.length ? html : "<p class='sub'>No employees match.</p>";
+}
+
+// Updates an employee's Branch directly from the inline dropdown in the
+// directory table. Saves immediately on change — no separate save button.
+async function setEmployeeBranch(empId, newBranch){
+  const status = document.getElementById("emp_dir_status");
+  try{
+    const { error } = await sb.from("employees").update({ branch: newBranch || null }).eq("id", empId);
+    if(error) throw error;
+    const emp = EMPLOYEES.find(e=>e.id === empId);
+    if(emp) emp.branch = newBranch || null;
+    if(status){ status.className = ""; status.textContent = "✅ Branch updated."; }
+    await logActivity("employee_branch_set", ME.username + " set branch to \"" + (newBranch||"none") + "\" for employee #" + empId);
+  }catch(e){
+    if(status) status.textContent = "❌ Could not update branch: " + (e.message||e);
+  }
+}
+
+// Jumps to the correct existing create-account tab, pre-filled with a
+// username suggested from the employee's name. Nothing is created yet —
+// the Super Admin still reviews and submits the form themselves.
+function grantAccessFromEmployee(empId){
+  const emp = EMPLOYEES.find(e=>e.id === empId);
+  if(!emp) return;
+  const roleSel = document.getElementById("role_pick_" + empId);
+  const role = roleSel ? roleSel.value : "user";
+
+  PENDING_EMPLOYEE = { id: emp.id, employee_id: emp.employee_id, full_name: emp.full_name };
+
+  // Prefill with the employee's actual name (trimmed only, no slugifying).
+  // The Super Admin can edit this before submitting, exactly as with a
+  // manually typed username.
+  const suggestedUsername = emp.full_name.trim();
+
+  if(role === "super_admin"){
+    showCreateTab("tab-create-sa");
+    document.getElementById("sa_username").value = suggestedUsername;
+  } else if(role === "admin"){
+    showCreateTab("tab-create-admin");
+    document.getElementById("a_username").value = suggestedUsername;
+  } else {
+    showCreateTab("tab-create-user-sa");
+    document.getElementById("u2_username").value = suggestedUsername;
+  }
+
+  const dirStatus = document.getElementById("emp_dir_status");
+  if(dirStatus) dirStatus.textContent = "Creating account for " + emp.full_name + " (" + emp.employee_id + ") \u2014 complete the form and submit.";
+}
+
+// Called after any of the three create-account functions succeeds.
+// No-op if Grant Access was never used (normal manual account creation).
+async function linkPendingEmployeeIfAny(newProfileId){
+  if(!PENDING_EMPLOYEE) return;
+  try{
+    await callEdgeFunction({ action:"link_employee", employee_id: PENDING_EMPLOYEE.id, profile_id: newProfileId });
+  }catch(e){
+    console.warn("Employee link failed (account was still created):", e.message||e);
+  }
+  PENDING_EMPLOYEE = null;
+  await loadEmployeeDirectory();
+}
+
+// Changes an already-linked account's role directly from the Employee
+// Directory (e.g. User -> Admin, Admin -> Super Admin). Super Admin
+// accounts can never be the target — same protection the system already
+// applies to delete_account and admin_reset_password.
+async function changeEmployeeRole(empId, profileId, currentRole){
+  const sel = document.getElementById("chg_role_" + empId);
+  const newRole = sel ? sel.value : null;
+  if(!newRole || newRole === currentRole) return;
+  if(!confirm("Change this account's role from \"" + currentRole + "\" to \"" + newRole + "\"?")) return;
+
+  const status = document.getElementById("emp_dir_status");
+  if(status) status.textContent = "Updating role…";
+  try{
+    const payload = { action:"change_role", target_id: profileId, new_role: newRole };
+    if(newRole === "super_admin") payload.super_admin_type = "technical";
+    const res = await callEdgeFunction(payload);
+    await logActivity("role_changed", ME.username + " changed role for \"" + res.username + "\" to " + newRole);
+    if(status) status.textContent = "\u2705 " + res.message;
+    await loadEmployeeDirectory();
+    await loadRoleDropdown();
+  }catch(e){
+    if(status) status.textContent = "\u274c " + (e.message||e);
+  }
+}
+
+// Create User — Super Admin variant. Mirrors createUser() but uses its own
+// input ids (u2_*) so it can live in the Super Admin tab bar without
+// clashing with the Admin-only Create User card elsewhere on the page.
+async function createUserAsSuperAdmin(){
+  const status = document.getElementById("u2_status");
+  const username = document.getElementById("u2_username").value.trim();
+  const password = document.getElementById("u2_password").value;
+
+  if(!username || !password){ status.className="status err"; status.textContent="Enter a username and password."; return; }
+
+  status.className = "status"; status.textContent = "Creating...";
+  try{
+    const res = await callEdgeFunction({ action:"create_user", username, password });
+    status.className = "status ok"; status.textContent = "\u2705 " + res.message;
+    document.getElementById("u2_username").value = ""; document.getElementById("u2_password").value = "";
+    await logActivity("user_created", ME.username + " created User account \"" + username + "\"");
+    await loadRoleDropdown();
+    await linkPendingEmployeeIfAny(res.id);
+  }catch(e){
+    status.className = "status err"; status.textContent = "\u274c " + e.message;
+  }
+}
+
+// =========================================================
+// SELF-SERVICE PASSWORD CHANGE (unchanged)
+// =========================================================
+async function changeMyPassword(){
+  const status = document.getElementById("pw_status");
+  const p1 = document.getElementById("new_password").value;
+  const p2 = document.getElementById("confirm_password").value;
+  if(!p1 || p1 !== p2){ status.className="status err"; status.textContent="Passwords do not match."; return; }
+
+  status.className = "status"; status.textContent = "Updating...";
+  try{
+    const res = await callEdgeFunction({ action:"change_password", new_password:p1 });
+    status.className = "status ok"; status.textContent = "✅ " + res.message;
+    document.getElementById("new_password").value = ""; document.getElementById("confirm_password").value = "";
+    await logActivity("password_changed", ME.username + " changed their own password");
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+// =========================================================
+// MANAGE ROLE — dropdown-driven CRUD.
+// Super Admin: sees Admins + Users. Admin: sees only the Users they created.
+// =========================================================
+let ROLE_ACCOUNTS = []; // cached list, joined with employee info, for the Manage Role search box
+
+async function loadRoleDropdown(){
+  let rows = [];
+  if(ME.role === "super_admin"){
+    const { data } = await sb.from("profiles").select("id, username, role").in("role", ["admin","user"]).order("role").order("username");
+    rows = data || [];
+  } else if(ME.role === "admin"){
+    const { data } = await sb.from("profiles").select("id, username, role").eq("created_by", ME.id).eq("role", "user").order("username");
+    rows = data || [];
+  }
+
+  // Join with employees (best-effort — an account not created via Grant
+  // Access simply has no employee_id/employee_name, which is fine).
+  let empMap = {};
+  if(rows.length){
+    const ids = rows.map(r=>r.id);
+    const { data: emps } = await sb.from("employees").select("employee_id, full_name, linked_profile_id").in("linked_profile_id", ids);
+    (emps||[]).forEach(e=>{ empMap[e.linked_profile_id] = { employee_id: e.employee_id, employee_name: e.full_name }; });
+  }
+
+  ROLE_ACCOUNTS = rows.map(r=>({
+    id: r.id, username: r.username, role: r.role,
+    employee_id: (empMap[r.id]||{}).employee_id || "",
+    employee_name: (empMap[r.id]||{}).employee_name || ""
+  }));
+
+  const searchEl = document.getElementById("role_search");
+  if(searchEl) searchEl.value = "";
+  renderRoleDropdown();
+  document.getElementById("roleDetailsPanel").classList.add("hidden");
+}
+
+// Filters ROLE_ACCOUNTS by whatever is in the search box (username, role,
+// employee ID, or employee name — case-insensitive substring match).
+// Renders a visible clickable results list (the actual search "output"),
+// and keeps the underlying hidden <select> in sync for onRoleAccountSelected.
+function renderRoleDropdown(){
+  const sel = document.getElementById("role_account_select");
+  const resultsWrap = document.getElementById("role_search_results");
+  const searchEl = document.getElementById("role_search");
+  const q = searchEl ? searchEl.value.trim().toLowerCase() : "";
+  const currentValue = sel.value;
+
+  const filtered = !q ? ROLE_ACCOUNTS : ROLE_ACCOUNTS.filter(r=>{
+    const hay = (r.username + " " + r.role + " " + r.employee_id + " " + r.employee_name).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  });
+
+  sel.innerHTML = '<option value="">-- Select --</option>' +
+    filtered.map(r=>{
+      const empTag = r.employee_id ? ` — ${r.employee_id} / ${r.employee_name}` : "";
+      return `<option value="${r.id}">${r.username} (${r.role})${empTag}</option>`;
+    }).join("");
+  if(filtered.some(r=>r.id === currentValue)) sel.value = currentValue;
+
+  if(resultsWrap){
+    if(!filtered.length){
+      resultsWrap.innerHTML = "<p class='sub'>No matching accounts.</p>";
+    } else {
+      resultsWrap.innerHTML = filtered.map(r=>{
+        const empTag = r.employee_id ? " &mdash; " + r.employee_id + " / " + r.employee_name : "";
+        const active = r.id === currentValue ? " style=\"border-color:var(--accent);\"" : "";
+        return "<div class=\"search-result-row\"" + active + " onclick=\"pickRoleAccount('" + r.id + "')\">" +
+          "<b>" + r.username + "</b> (" + r.role + ")" + empTag + "</div>";
+      }).join("");
+    }
+  }
+}
+
+// Click handler for a row in the visible results list — selects that
+// account exactly as if it had been chosen from the (now hidden) <select>.
+function pickRoleAccount(id){
+  const sel = document.getElementById("role_account_select");
+  sel.value = id;
+  onRoleAccountSelected();
+}
+
+async function onRoleAccountSelected(){
+  const id = document.getElementById("role_account_select").value;
+  const panel = document.getElementById("roleDetailsPanel");
+  if(!id){ panel.classList.add("hidden"); return; }
+
+  const { data: profile, error } = await sb.from("profiles").select("id, username, role").eq("id", id).single();
+  if(error || !profile){ panel.innerHTML = "Error loading account."; panel.classList.remove("hidden"); return; }
+
+  const { data: ps } = await sb.from("profile_sections").select("section_id").eq("profile_id", id);
+  const assignedSectionIds = (ps||[]).map(r=>r.section_id);
+
+  if(profile.role === "admin"){
+    const { data: ap } = await sb.from("assigned_pages").select("page_id").eq("profile_id", id);
+    const assignedPageIds = (ap||[]).map(r=>r.page_id);
+    // Super Admin can grant from every Section; an Admin managing another
+    // account can only work within their own Sections.
+    const availableSectionIds = ME.role === "super_admin" ? ALL_SECTIONS.map(s=>s.id) : (ME.sectionIds || []);
+
+    panel.innerHTML = `
+      <label>Username</label><input id="role_username" value="${profile.username}">
+      <label>Sections &amp; Pages (tick the Branches, then the exact modules this Admin may use)</label>
+      <div id="role_sections_pages"></div>
+      <button onclick="saveRoleDetails('${id}','admin')">SAVE DETAILS</button>
+
+      <div class="grid" style="margin-top:16px;">
+        <div><label>New Password</label><input id="role_new_password" type="password"></div>
+        <div><label>Confirm New Password</label><input id="role_confirm_password" type="password"></div>
+      </div>
+      <button onclick="resetRolePassword('${id}')">RESET PASSWORD</button>
+
+      <div class="status" id="role_status"></div>
+      <button class="danger" onclick="deleteRoleAccount('${id}','${profile.username}')">DELETE ACCOUNT</button>
+    `;
+    await renderSectionsWithPages("role_sections_pages", availableSectionIds, assignedSectionIds, assignedPageIds);
+  } else {
+    const { data: ap } = await sb.from("assigned_pages").select("page_id").eq("profile_id", id);
+    const assignedPageIds = (ap||[]).map(r=>r.page_id);
+    // A User's available Sections are limited to whichever Sections the
+    // managing Admin themselves has (or every Section, if Super Admin).
+    const availableSectionIds = ME.role === "super_admin" ? ALL_SECTIONS.map(s=>s.id) : (ME.sectionIds || []);
+
+    panel.innerHTML = `
+      <label>Username</label><input id="role_username" value="${profile.username}">
+      <label>Sections &amp; Pages</label>
+      <div id="role_sections_pages"></div>
+      <button onclick="saveRoleDetails('${id}','user')">SAVE DETAILS</button>
+
+      <div class="grid" style="margin-top:16px;">
+        <div><label>New Password</label><input id="role_new_password" type="password"></div>
+        <div><label>Confirm New Password</label><input id="role_confirm_password" type="password"></div>
+      </div>
+      <button onclick="resetRolePassword('${id}')">RESET PASSWORD</button>
+
+      <div class="status" id="role_status"></div>
+      <button class="danger" onclick="deleteRoleAccount('${id}','${profile.username}')">DELETE ACCOUNT</button>
+    `;
+    await renderSectionsWithPages("role_sections_pages", availableSectionIds, assignedSectionIds, assignedPageIds);
+  }
+  panel.classList.remove("hidden");
+}
+
+async function saveRoleDetails(id, role){
+  const status = document.getElementById("role_status");
+  const username = document.getElementById("role_username").value.trim();
+  if(!username){ status.className="status err"; status.textContent="Username cannot be empty."; return; }
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { error: uErr } = await sb.from("profiles").update({ username }).eq("id", id);
+    if(uErr) throw uErr;
+
+    if(role === "admin"){
+      const { sectionIds, pageIds } = getCheckedSectionsAndPages("role_sections_pages");
+      const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
+      if(delSecErr) throw delSecErr;
+      if(sectionIds.length){
+        const secRows = sectionIds.map(s=>({ profile_id: id, section_id: s }));
+        const { error: insSecErr } = await sb.from("profile_sections").insert(secRows);
+        if(insSecErr) throw insSecErr;
+      }
+      const { error: delPageErr } = await sb.from("assigned_pages").delete().eq("profile_id", id);
+      if(delPageErr) throw delPageErr;
+      if(pageIds.length){
+        const pageRows = pageIds.map(p=>({ profile_id: id, page_id: p }));
+        const { error: insPageErr } = await sb.from("assigned_pages").insert(pageRows);
+        if(insPageErr) throw insPageErr;
+      }
+    } else {
+      const { sectionIds, pageIds } = getCheckedSectionsAndPages("role_sections_pages");
+      const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
+      if(delSecErr) throw delSecErr;
+      if(sectionIds.length){
+        const secRows = sectionIds.map(s=>({ profile_id: id, section_id: s }));
+        const { error: insSecErr } = await sb.from("profile_sections").insert(secRows);
+        if(insSecErr) throw insSecErr;
+      }
+      const { error: delPageErr } = await sb.from("assigned_pages").delete().eq("profile_id", id);
+      if(delPageErr) throw delPageErr;
+      if(pageIds.length){
+        const pageRows = pageIds.map(p=>({ profile_id: id, page_id: p }));
+        const { error: insPageErr } = await sb.from("assigned_pages").insert(pageRows);
+        if(insPageErr) throw insPageErr;
+      }
+    }
+
+    status.className = "status ok"; status.textContent = "✅ Details saved.";
+    await logActivity("account_edited", ME.username + " edited account details for \"" + username + "\"");
+    await loadRoleDropdown();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function resetRolePassword(id){
+  const status = document.getElementById("role_status");
+  const p1 = document.getElementById("role_new_password").value;
+  const p2 = document.getElementById("role_confirm_password").value;
+  if(!p1 || p1 !== p2 || p1.length < 6){ status.className="status err"; status.textContent="Passwords must match and be at least 6 characters."; return; }
+
+  status.className = "status"; status.textContent = "Resetting...";
+  try{
+    const res = await callEdgeFunction({ action:"admin_reset_password", target_id:id, new_password:p1 });
+    status.className = "status ok"; status.textContent = "✅ " + res.message;
+    document.getElementById("role_new_password").value = ""; document.getElementById("role_confirm_password").value = "";
+    await logActivity("password_reset", ME.username + " reset a password for another account");
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function deleteRoleAccount(id, username){
+  if(!confirm("Permanently delete the account \"" + username + "\"?\n\nThis cannot be undone.")) return;
+  try{
+    const res = await callEdgeFunction({ action:"delete_account", target_id: id });
+    alert("✅ " + res.message);
+    await logActivity("account_deleted", ME.username + " deleted account \"" + username + "\"");
+    await loadRoleDropdown();
+  }catch(e){
+    alert("❌ " + e.message);
+  }
+}
+
+// =========================================================
+// ACTIVITY LOG (unchanged)
+// =========================================================
+let LOG_ROWS = [];
+
+async function loadActivityLog(){
+  const wrap = document.getElementById("activityWrap");
+  const { data, error } = await sb
+    .from("activity_log")
+    .select("actor_username, actor_role, action_type, description, created_at")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if(error){ wrap.innerHTML = "Error: " + error.message; return; }
+  LOG_ROWS = data || [];
+
+  const types = [...new Set(LOG_ROWS.map(r=>r.action_type).filter(Boolean))].sort();
+  document.getElementById("log_action_type").innerHTML = '<option value="">All</option>' +
+    types.map(t=>`<option value="${t}">${t}</option>`).join("");
+
+  renderActivityLog(LOG_ROWS);
+}
+
+function applyActivityLogFilter(){
+  const from = document.getElementById("log_from").value;
+  const to = document.getElementById("log_to").value;
+  const actionType = document.getElementById("log_action_type").value;
+  const search = document.getElementById("log_search").value.trim().toLowerCase();
+
+  const filtered = LOG_ROWS.filter(r=>{
+    const day = r.created_at ? r.created_at.slice(0,10) : "";
+    if(from && day < from) return false;
+    if(to && day > to) return false;
+    if(actionType && r.action_type !== actionType) return false;
+    if(search){
+      const haystack = ((r.actor_username||"") + " " + (r.description||"")).toLowerCase();
+      if(haystack.indexOf(search) === -1) return false;
+    }
+    return true;
+  });
+
+  renderActivityLog(filtered);
+}
+
+function renderActivityLog(rows){
+  const wrap = document.getElementById("activityWrap");
+  if(!rows || !rows.length){ wrap.innerHTML = "<p>No activity found for this filter.</p>"; return; }
+
+  let html = "<table><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr>";
+  rows.forEach(r=>{
+    const when = r.created_at ? new Date(r.created_at).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
+    html += `<tr><td>${when}</td><td>${r.actor_username||""} (${r.actor_role||""})</td><td>${r.action_type||""}</td><td>${r.description||""}</td></tr>`;
+  });
+  html += "</table>";
+  wrap.innerHTML = html;
+}
+
+function exportActivityLogPDF(){
+  const from = document.getElementById("log_from").value;
+  const to = document.getElementById("log_to").value;
+  const actionType = document.getElementById("log_action_type").value;
+  const search = document.getElementById("log_search").value.trim();
+
+  const rows = LOG_ROWS.filter(r=>{
+    const day = r.created_at ? r.created_at.slice(0,10) : "";
+    if(from && day < from) return false;
+    if(to && day > to) return false;
+    if(actionType && r.action_type !== actionType) return false;
+    if(search){
+      const haystack = ((r.actor_username||"") + " " + (r.description||"")).toLowerCase();
+      if(haystack.indexOf(search.toLowerCase()) === -1) return false;
+    }
+    return true;
+  });
+
+  if(!rows.length){ alert("No activity to export for this filter."); return; }
+
+  let body = "";
+  rows.forEach(r=>{
+    const when = r.created_at ? new Date(r.created_at).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
+    body += `<tr><td>${when}</td><td>${r.actor_username||""} (${r.actor_role||""})</td><td>${r.action_type||""}</td><td>${r.description||""}</td></tr>`;
+  });
+
+  const metaParts = [];
+  if(from || to) metaParts.push("Date: " + (from||"-") + " to " + (to||"-"));
+  if(actionType) metaParts.push("Action: " + actionType);
+  if(search) metaParts.push("Search: \"" + search + "\"");
+  const meta = metaParts.length ? metaParts.join(" &nbsp;|&nbsp; ") : "All activity";
+
+  document.getElementById("printArea").innerHTML =
+    '<div class="grp">RUMBU INDUSTRIES GROUP</div><h1>Activity Log</h1>' +
+    '<div class="meta">' + meta + ' &nbsp;|&nbsp; ' + rows.length + ' record(s)</div>' +
+    '<table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>' + body + '</tbody></table>';
+  window.print();
+}
+
+init();
+</script>
+</body>
+</html>

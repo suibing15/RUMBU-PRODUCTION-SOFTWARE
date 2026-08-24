@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technical Loss Live Board</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  :root{--sans:"Inter","Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  body { font-family:var(--sans); background: #0b1b2b; color: white; margin: 0; padding: 20px; }
+  .header { text-align: center; font-size: 22px; font-weight: bold; color: #00e5ff; }
+  .clock { text-align: center; margin: 10px; color: #ffd54f; }
+  #status { text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #1565c0; padding: 10px; }
+  td { padding: 10px; border-bottom: 1px solid #555; text-align: center; }
+  select { padding: 6px 10px; border-radius: 5px; }
+  button { background: #00c853; border: none; padding: 6px 10px; color: white; cursor: pointer; border-radius: 5px; }
+  button.refresh { background:#ff9800; }
+  .no-data { text-align: center; color: red; }
+</style>
+</head>
+<body>
+
+<div class="header">TECHNICAL LOSS LIVE BOARD</div>
+<div class="clock" id="clock"></div>
+<div id="status">Connecting to Supabase...</div>
+
+<select id="shedFilter" onchange="loadData()">
+  <option value="All">All</option>
+  <option value="1">Shed 1</option><option value="2">Shed 2</option><option value="3">Shed 3</option>
+  <option value="4">Shed 4</option><option value="5">Shed 5</option><option value="6">Shed 6</option>
+</select>
+<br><br>
+<button class="refresh" onclick="loadData()">Refresh Data</button>
+
+<table>
+  <thead><tr><th>Assets</th><th>Downtime (Min)</th><th>Shed</th><th>Description</th><th>Action</th></tr></thead>
+  <tbody id="tableBody"><tr><td colspan="5" class="no-data">Loading data...</td></tr></tbody>
+</table>
+
+<script>
+const SUPABASE_URL = "https://betfhunzmhtdzgvufmfk.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_AfDp1FlHghu9TOfqEUj20Q_Pke7GlTp";
+function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json" }; }
+
+setInterval(()=>{ document.getElementById("clock").innerHTML = new Date().toLocaleString(); }, 1000);
+
+// Compute the current shift and working date using fixed UTC+1 (WAT),
+// matching the original's GMT+1 logic regardless of the viewer's own
+// device timezone.
+function watNow(){
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset()*60000;
+  return new Date(utcMs + 1*3600000);
+}
+function currentShiftAndDate(){
+  const wat = watNow();
+  const hour = wat.getHours();
+  const shift = (hour >= 7 && hour < 19) ? "Morning" : "Night";
+  let workingDate = wat;
+  if(shift === "Night" && hour < 7){
+    workingDate = new Date(wat); workingDate.setDate(wat.getDate()-1);
+  }
+  const y = workingDate.getFullYear(), m = String(workingDate.getMonth()+1).padStart(2,"0"), d = String(workingDate.getDate()).padStart(2,"0");
+  return { shift, dateStr: y+"-"+m+"-"+d };
+}
+
+let MON_ROWS = [], TREATED_IDS = new Set();
+
+async function init(){
+  const status = document.getElementById("status");
+  try{
+    const [monRes, treatedRes] = await Promise.all([
+      fetch(SUPABASE_URL + "/rest/v1/monitoring?select=*", { headers: authHeaders() }),
+      fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number", { headers: authHeaders() })
+    ]);
+    if(!monRes.ok) throw new Error("monitoring: HTTP " + monRes.status);
+    MON_ROWS = await monRes.json();
+    if(treatedRes.ok){
+      const treatedRows = await treatedRes.json();
+      TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
+    }
+    status.style.color = "#7fffb0";
+    status.textContent = "Connected. monitoring: " + MON_ROWS.length + " rows, treated: " + TREATED_IDS.size + ".";
+    loadData();
+  }catch(e){
+    status.style.color = "#ff8a80";
+    status.textContent = "Could not read data: " + (e.message||e);
+  }
+}
+
+function loadData(){
+  const shed = document.getElementById("shedFilter").value;
+  const { shift, dateStr } = currentShiftAndDate();
+  const now = new Date();
+
+  const rows = MON_ROWS.filter(r=>{
+    if(r.date_col !== dateStr) return false;
+    if(r.shift !== shift) return false;
+    if(r.job_code !== "Technical Loss") return false;
+    if(TREATED_IDS.has(String(r.asset_id))) return false;
+    if(shed !== "All" && String(r.shed) !== shed) return false;
+    return true;
+  });
+
+  const body = document.getElementById("tableBody");
+  body.innerHTML = "";
+  if(!rows.length){
+    body.innerHTML = '<tr><td colspan="5" class="no-data">No Data</td></tr>';
+    return;
+  }
+
+  rows.forEach(r=>{
+    const stop = new Date(r.m_c_stoppage_time);
+    const downtimeMin = isNaN(stop) ? "" : (Math.round(((now - stop)/60000)*100)/100);
+    const tr = document.createElement("tr");
+    tr.id = "row-" + r.asset_id;
+    tr.innerHTML = `<td>${r.assets||""}</td><td>${downtimeMin}</td><td>${r.shed||""}</td><td>${r.descripttion||""}</td>` +
+      `<td><button onclick="confirmTreat('${r.asset_id}')">TREATED</button></td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function confirmTreat(id){
+  if(!confirm("Mark as treated?")) return;
+  try{
+    const row = { id_number: id, treated_time: new Date().toISOString() };
+    const res = await fetch(SUPABASE_URL + "/rest/v1/treated_table", {
+      method: "post", headers: authHeaders(), body: JSON.stringify(row)
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status + " - " + await res.text());
+    TREATED_IDS.add(String(id));
+    const el = document.getElementById("row-" + id);
+    if(el) el.remove();
+  }catch(e){
+    alert("Error: " + (e.message||e));
+  }
+}
+
+init();
+</script>
+</body>
+</html>

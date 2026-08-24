@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HR — Add Gatepass Type</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    function apply(t){ if(t) document.documentElement.setAttribute("data-theme", t); }
+    window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme) apply(e.data.rumbuTheme); });
+    try{ apply(localStorage.getItem("rumbu_theme")); }catch(e){}
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  :root{--navy:var(--heading);--blue:var(--accent);--blue-dark:var(--accent-2);--muted:#6b7280;--red:#c0392b;--green:#1d8a4e;}
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:var(--bg);margin:0;padding:18px;color:var(--text);}
+  .wrap{max-width:900px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h3{color:var(--navy);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--blue);font-size:12px;margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:10px 0 4px;}
+  input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > div{flex:1;min-width:180px;}
+  button{padding:11px 16px;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;background:var(--blue);color:#fff;margin-top:14px;}
+  button:hover{background:var(--blue-dark);}
+  button:disabled{opacity:.6;cursor:not-allowed;}
+  .status{margin-top:10px;font-weight:bold;font-size:13px;min-height:16px;}
+  .status.ok{color:var(--green);} .status.err{color:var(--red);}
+  #connStatus{font-size:12px;font-weight:bold;text-align:center;margin-bottom:10px;}
+  .picker{border:1px solid var(--line);border-radius:8px;padding:10px;max-height:260px;overflow-y:auto;margin-top:6px;background:var(--bg);}
+  .picker label{display:flex;align-items:center;gap:8px;font-weight:normal;font-size:13px;margin:0;padding:6px 4px;cursor:pointer;}
+  .picker label:hover{background:var(--card);border-radius:6px;}
+  .picker input[type=checkbox]{width:auto;}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:5px 6px 5px 12px;margin:3px 4px 0 0;font-size:12px;}
+  .chip button{margin:0;padding:0;width:18px;height:18px;line-height:16px;border-radius:50%;background:var(--red);font-size:12px;font-weight:bold;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  thead th{background:var(--navy);color:#fff;font-size:12px;}
+  tbody tr:nth-child(even){background:#f6f8fb;}
+  .noaccess{color:var(--red);font-weight:bold;text-align:center;padding:30px;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div id="appArea" style="display:none;">
+
+<div class="card">
+  <h3>Add Gatepass Type</h3>
+  <p class="sub">Define a gatepass type for a Branch, and pick who is allowed to approve it.</p>
+
+  <label>Branch</label>
+  <select id="branch" onchange="onBranchChanged()"></select>
+
+  <label>Gatepass Type Name</label>
+  <input type="text" id="typeName" placeholder="e.g. IT Gatepass">
+
+  <label>Approvers (select one or more employees)</label>
+  <input type="text" id="approverSearch" placeholder="Search employees by name or ID" oninput="renderApproverPicker()">
+  <div class="picker" id="approverPicker"></div>
+  <div id="selectedApproversList" style="margin-top:8px;"></div>
+
+  <button onclick="save()">Save Gatepass Type</button>
+  <div class="status" id="status"></div>
+</div>
+
+<div class="card">
+  <h3>Existing Gatepass Types</h3>
+  <p class="sub" id="scopeNote"></p>
+  <div id="tableWrap"></div>
+</div>
+
+</div>
+
+<div id="noAccess" class="noaccess" style="display:none;">
+  You do not have permission to manage gatepass types. Only Admins and Super Admins can.
+</div>
+</div>
+
+<script>
+let ME = null;
+let EMPLOYEES = [];
+let SELECTED_APPROVERS = new Set();
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){ console.warn("Activity log write failed (non-fatal):", e); }
+}
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    if(ME.role !== "super_admin" && ME.role !== "admin"){
+      status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+      document.getElementById("noAccess").style.display = "block";
+      return;
+    }
+
+    document.getElementById("appArea").style.display = "block";
+    document.getElementById("scopeNote").textContent = ME.role === "super_admin"
+      ? "Showing gatepass types for every Branch."
+      : "Showing gatepass types for your own Branch only.";
+
+    populateBranches();
+    await loadEmployeesForPicker();
+    await loadExistingTypes();
+
+    status.style.color = "#1d8a4e";
+    status.textContent = "Connected.";
+  }catch(e){
+    status.style.color = "#c0392b";
+    status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+// Same branch-population pattern used in Add Gatepass.
+function populateBranches(){
+  const sel = document.getElementById("branch");
+  sel.innerHTML = "";
+
+  if(ME.role === "super_admin"){
+    sb.from("app_sections").select("name").order("name").then(({data})=>{
+      (data || []).forEach(s=>{
+        const o = document.createElement("option");
+        o.value = s.name; o.textContent = s.name;
+        sel.appendChild(o);
+      });
+      onBranchChanged();
+    });
+    sel.disabled = false;
+    return;
+  }
+
+  const mine = ME.sectionNames || [];
+  if(!mine.length){
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— no branch assigned —";
+    sel.appendChild(o);
+    sel.disabled = true;
+    return;
+  }
+  mine.forEach(name=>{
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+  sel.disabled = (mine.length === 1);
+  onBranchChanged();
+}
+
+function onBranchChanged(){
+  loadExistingTypes();
+}
+
+async function loadEmployeesForPicker(){
+  const { data, error } = await sb.from("employees").select("id, employee_id, full_name, department").order("full_name");
+  if(error){ console.warn("Could not load employees:", error.message); return; }
+  EMPLOYEES = data || [];
+  renderApproverPicker();
+}
+
+// Search-only: nothing is shown until the person types something. This
+// avoids dumping the entire employee roster on screen by default.
+function renderApproverPicker(){
+  const wrap = document.getElementById("approverPicker");
+  const q = document.getElementById("approverSearch").value.trim().toLowerCase();
+
+  if(!q){
+    wrap.innerHTML = "<p class='sub'>Type a name or ID above to find employees.</p>";
+    return;
+  }
+
+  const rows = EMPLOYEES.filter(e=>{
+    const hay = (e.full_name + " " + e.employee_id).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  });
+
+  if(!rows.length){ wrap.innerHTML = "<p class='sub'>No employees match.</p>"; return; }
+
+  wrap.innerHTML = rows.map(e=>{
+    const checked = SELECTED_APPROVERS.has(e.id) ? "checked" : "";
+    return `<label><input type="checkbox" value="${e.id}" ${checked} onchange="toggleApprover(${e.id}, this.checked)">` +
+      `${e.full_name} <span style="color:var(--muted);">(${e.employee_id}${e.department ? " · " + e.department : ""})</span></label>`;
+  }).join("");
+}
+
+// Persistent chip list — shows everyone selected so far, independent of
+// whatever is currently typed in the search box (so a cleared search box
+// doesn't make it look like the selections disappeared).
+function renderSelectedApprovers(){
+  const wrap = document.getElementById("selectedApproversList");
+  if(!SELECTED_APPROVERS.size){ wrap.innerHTML = ""; return; }
+
+  const chips = Array.from(SELECTED_APPROVERS).map(id=>{
+    const e = EMPLOYEES.find(emp => emp.id === id);
+    const label = e ? (e.full_name + " (" + e.employee_id + ")") : ("#" + id);
+    return `<span class="chip">${label}<button onclick="removeApprover(${id})" title="Remove">&times;</button></span>`;
+  }).join("");
+  wrap.innerHTML = "<label>Selected Approvers</label>" + chips;
+}
+
+function toggleApprover(id, isChecked){
+  if(isChecked) SELECTED_APPROVERS.add(id); else SELECTED_APPROVERS.delete(id);
+  renderSelectedApprovers();
+}
+
+// Removes an approver via the chip's × button — unchecks it in the search
+// results too, if that employee happens to be currently visible there.
+function removeApprover(id){
+  SELECTED_APPROVERS.delete(id);
+  const box = document.querySelector('#approverPicker input[value="' + id + '"]');
+  if(box) box.checked = false;
+  renderSelectedApprovers();
+}
+
+async function save(){
+  const status = document.getElementById("status");
+  const branch = document.getElementById("branch").value;
+  const typeName = document.getElementById("typeName").value.trim();
+
+  if(!branch){ status.className = "status err"; status.textContent = "No Branch available."; return; }
+  if(!typeName){ status.className = "status err"; status.textContent = "Enter a Gatepass Type name."; return; }
+  if(!SELECTED_APPROVERS.size){ status.className = "status err"; status.textContent = "Select at least one approver."; return; }
+  if(ME.role !== "super_admin" && (ME.sectionNames || []).indexOf(branch) === -1){
+    status.className = "status err"; status.textContent = "You are not assigned to that Branch."; return;
+  }
+
+  status.className = "status"; status.textContent = "Saving...";
+  try{
+    const { data: typeRow, error: typeErr } = await sb.from("hr_gatepass_types")
+      .insert({ branch, type_name: typeName, created_by_username: ME.username })
+      .select("id").single();
+    if(typeErr) throw typeErr;
+
+    const approverRows = Array.from(SELECTED_APPROVERS).map(empId => ({
+      gatepass_type_id: typeRow.id, employee_id: empId
+    }));
+    const { error: apErr } = await sb.from("hr_gatepass_type_approvers").insert(approverRows);
+    if(apErr) throw apErr;
+
+    await logActivity("gatepass_type_added", ME.username + " added gatepass type \"" + typeName + "\" for " + branch + " with " + approverRows.length + " approver(s)");
+    status.className = "status ok"; status.textContent = "✅ Saved \"" + typeName + "\" for " + branch + ".";
+
+    document.getElementById("typeName").value = "";
+    SELECTED_APPROVERS.clear();
+    renderApproverPicker();
+    renderSelectedApprovers();
+    await loadExistingTypes();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = e.message && e.message.indexOf("duplicate") !== -1
+      ? "❌ That Gatepass Type already exists for this Branch."
+      : "❌ " + e.message;
+  }
+}
+
+async function loadExistingTypes(){
+  const wrap = document.getElementById("tableWrap");
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  let q = sb.from("hr_gatepass_types").select("id, branch, type_name, created_by_username, created_at").order("created_at", { ascending: false });
+  if(ME.role !== "super_admin"){
+    if(ME.sectionNames && ME.sectionNames.length){ q = q.in("branch", ME.sectionNames); }
+    else { q = q.eq("branch", "___none___"); }
+  }
+  const { data: types, error } = await q;
+  if(error){ wrap.innerHTML = "<p style='color:var(--red);'>❌ " + error.message + "</p>"; return; }
+  if(!types || !types.length){ wrap.innerHTML = "<p>No gatepass types yet.</p>"; return; }
+
+  const typeIds = types.map(t=>t.id);
+  const { data: approverLinks } = await sb.from("hr_gatepass_type_approvers").select("gatepass_type_id, employee_id").in("gatepass_type_id", typeIds);
+  const empIds = [...new Set((approverLinks||[]).map(a=>a.employee_id))];
+  let empNameMap = {};
+  if(empIds.length){
+    const { data: emps } = await sb.from("employees").select("id, full_name").in("id", empIds);
+    (emps||[]).forEach(e=>{ empNameMap[e.id] = e.full_name; });
+  }
+  let approversByType = {};
+  (approverLinks||[]).forEach(a=>{
+    if(!approversByType[a.gatepass_type_id]) approversByType[a.gatepass_type_id] = [];
+    approversByType[a.gatepass_type_id].push(empNameMap[a.employee_id] || "?");
+  });
+
+  let html = "<table><thead><tr><th>Branch</th><th>Type</th><th>Approvers</th><th>Added By</th><th>Date</th></tr></thead><tbody>";
+  types.forEach(t=>{
+    html += "<tr>" +
+      "<td>" + t.branch + "</td>" +
+      "<td>" + t.type_name + "</td>" +
+      "<td>" + (approversByType[t.id] || []).join(", ") + "</td>" +
+      "<td>" + (t.created_by_username || "") + "</td>" +
+      "<td>" + new Date(t.created_at).toLocaleDateString() + "</td>" +
+      "</tr>";
+  });
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+}
+
+init();
+</script>
+</body>
+</html>

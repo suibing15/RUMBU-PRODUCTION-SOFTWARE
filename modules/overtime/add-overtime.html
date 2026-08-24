@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overtime — Initiate</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    function apply(t){ if(t) document.documentElement.setAttribute("data-theme", t); }
+    window.addEventListener("message", function(e){ if(e.data && e.data.rumbuTheme) apply(e.data.rumbuTheme); });
+    try{ apply(localStorage.getItem("rumbu_theme")); }catch(e){}
+  })();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  :root{--navy:var(--heading);--blue:var(--accent);--blue-dark:var(--accent-2);--muted:#6b7280;--red:#c0392b;--green:#1d8a4e;--amber:#d97706;}
+  *{box-sizing:border-box;}
+  body{font-family:var(--sans);background:var(--bg);margin:0;padding:18px;color:var(--text);}
+  .wrap{max-width:1050px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h3{color:var(--navy);margin:0 0 4px;font-size:16px;}
+  .card .sub{color:var(--blue);font-size:12px;margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:bold;color:var(--text);margin:10px 0 4px;}
+  input,select{width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;}
+  .row > div{flex:1;min-width:180px;}
+  .dept-picker{border:1px solid var(--line);border-radius:8px;padding:10px;max-height:200px;overflow-y:auto;margin-top:6px;background:var(--bg);}
+  .dept-picker label{display:flex;align-items:center;gap:8px;font-weight:normal;font-size:13px;margin:0;padding:6px 4px;cursor:pointer;}
+  .dept-picker label:hover{background:var(--card);border-radius:6px;}
+  .dept-picker input[type=checkbox]{width:auto;}
+  button{padding:11px 16px;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;background:var(--blue);color:#fff;margin-top:14px;}
+  button:hover{background:var(--blue-dark);}
+  button.mini{padding:6px 10px;font-size:12px;margin-top:0;}
+  .status{margin-top:10px;font-weight:bold;font-size:13px;min-height:16px;}
+  .status.ok{color:var(--green);} .status.err{color:var(--red);}
+  #connStatus{font-size:12px;font-weight:bold;text-align:center;margin-bottom:10px;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  thead th{background:var(--navy);color:#fff;font-size:12px;}
+  tbody tr:nth-child(even){background:#f6f8fb;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold;color:#fff;background:var(--amber);}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div class="card">
+  <h3>Initiate Overtime</h3>
+  <p class="sub">Step 1 — request overtime for one or more Departments within a Branch.</p>
+
+  <div class="row">
+    <div>
+      <label>Form Date</label>
+      <input type="date" id="formDate">
+    </div>
+    <div>
+      <label>Date of Overtime</label>
+      <input type="date" id="overtimeDate">
+    </div>
+    <div>
+      <label>Section (Branch)</label>
+      <select id="section" onchange="onSectionChanged()"></select>
+    </div>
+    <div>
+      <label>Propose Hours</label>
+      <input type="number" id="proposeHours" value="11" step="0.5" min="1">
+    </div>
+  </div>
+
+  <label>Departments (select all that apply)</label>
+  <div class="dept-picker" id="deptPicker"><p class="sub">Select a Section first.</p></div>
+
+  <label>Name of Initiator</label>
+  <input type="text" id="initiatorName" disabled>
+
+  <button onclick="initiate()">Initiate Overtime</button>
+  <div class="status" id="status"></div>
+</div>
+
+<div class="card">
+  <h3>Overtime History</h3>
+  <div class="row">
+    <div><label>From Date</label><input type="date" id="fromDate"></div>
+    <div><label>To Date</label><input type="date" id="toDate"></div>
+    <div style="flex:0 0 auto;align-self:flex-end;"><button class="mini" onclick="loadHistory()">Refresh</button></div>
+  </div>
+  <div id="historyWrap"></div>
+</div>
+
+</div>
+
+<script>
+let ME = null;
+let SELECTED_DEPTS = new Set();
+let ALL_HISTORY = [];
+const COMPANY = "Rumbu Industries Limited";
+
+async function logActivity(actionType, description){
+  try{
+    await sb.from("activity_log").insert({
+      actor_id: ME.id, actor_username: ME.username, actor_role: ME.role,
+      section_id: ME.sectionId, action_type: actionType, description: description
+    });
+  }catch(e){ console.warn("Activity log write failed (non-fatal):", e); }
+}
+
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    document.getElementById("formDate").value = todayISO();
+    document.getElementById("initiatorName").value = ME.username;
+    populateSections();
+
+    status.style.color = "#1d8a4e";
+    status.textContent = "Connected.";
+    await loadHistory();
+  }catch(e){
+    status.style.color = "#c0392b";
+    status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+// Same Branch-population pattern used across every other module.
+function populateSections(){
+  const sel = document.getElementById("section");
+  sel.innerHTML = "";
+
+  if(ME.role === "super_admin"){
+    sb.from("app_sections").select("name").order("name").then(({data})=>{
+      (data || []).forEach(s=>{
+        const o = document.createElement("option");
+        o.value = s.name; o.textContent = s.name;
+        sel.appendChild(o);
+      });
+      onSectionChanged();
+    });
+    sel.disabled = false;
+    return;
+  }
+
+  const mine = ME.sectionNames || [];
+  if(!mine.length){
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— no branch assigned —";
+    sel.appendChild(o);
+    sel.disabled = true;
+    return;
+  }
+  mine.forEach(name=>{
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+  sel.disabled = (mine.length === 1);
+  onSectionChanged();
+}
+
+// Loads the REAL organizational departments for the chosen Section,
+// from the departments table (managed in Manage Accounts -> Manage
+// Departments & Units) — NOT the modules table, which is a completely
+// separate concept (software feature categories, not real departments).
+async function onSectionChanged(){
+  const wrap = document.getElementById("deptPicker");
+  const section = document.getElementById("section").value;
+  SELECTED_DEPTS.clear();
+  if(!section){ wrap.innerHTML = "<p class='sub'>Select a Section first.</p>"; return; }
+  wrap.innerHTML = "<p class='sub'>Loading departments…</p>";
+  try{
+    const { data, error } = await sb.from("departments").select("name").eq("section", section).order("name");
+    if(error) throw error;
+    const depts = (data || []).map(d => d.name);
+    if(!depts.length){ wrap.innerHTML = "<p class='sub'>No departments set up for this Branch yet — ask your Super Admin to add some in Manage Departments &amp; Units.</p>"; return; }
+    wrap.innerHTML = depts.map(d=>{
+      const id = "dept_" + d.replace(/[^a-z0-9]/gi,"_");
+      return `<label><input type="checkbox" id="${id}" value="${d}" onchange="toggleDept('${d}', this.checked)"> ${d}</label>`;
+    }).join("");
+  }catch(e){
+    wrap.innerHTML = "<p class='sub' style='color:var(--red);'>Could not load departments: " + e.message + "</p>";
+  }
+}
+
+function toggleDept(name, checked){
+  if(checked) SELECTED_DEPTS.add(name); else SELECTED_DEPTS.delete(name);
+}
+
+async function nextFormNumber(){
+  const year = new Date().getFullYear().toString();
+  const prefix = "OT-" + year;
+  const { data, error } = await sb
+    .from("overtime_initiations")
+    .select("form_number")
+    .like("form_number", prefix + "%")
+    .order("form_number", { ascending: false })
+    .limit(1);
+  if(error) throw error;
+  let seq = 1;
+  if(data && data.length){
+    const last = data[0].form_number;
+    seq = parseInt(last.slice(prefix.length), 10) + 1;
+  }
+  return prefix + String(seq).padStart(4, "0");
+}
+
+async function initiate(){
+  const status = document.getElementById("status");
+  const formDate = document.getElementById("formDate").value;
+  const overtimeDate = document.getElementById("overtimeDate").value;
+  const section = document.getElementById("section").value;
+  const proposeHours = parseFloat(document.getElementById("proposeHours").value) || 11;
+
+  if(!formDate || !overtimeDate){ status.className="status err"; status.textContent="Form Date and Date of Overtime are required."; return; }
+  if(!section){ status.className="status err"; status.textContent="No Section available."; return; }
+  if(ME.role !== "super_admin" && (ME.sectionNames||[]).indexOf(section) === -1){
+    status.className="status err"; status.textContent="You are not assigned to that Section."; return;
+  }
+  if(!SELECTED_DEPTS.size){ status.className="status err"; status.textContent="Select at least one Department."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const formNumber = await nextFormNumber();
+
+    const { data: initRow, error: initErr } = await sb.from("overtime_initiations").insert({
+      form_number: formNumber, form_date: formDate, overtime_date: overtimeDate,
+      section: section, propose_hours: proposeHours,
+      initiator_username: ME.username, initiator_profile_id: ME.id
+    }).select("id").single();
+    if(initErr) throw initErr;
+
+    const deptRows = Array.from(SELECTED_DEPTS).map(d => ({ initiation_id: initRow.id, department: d }));
+    const { error: deptErr } = await sb.from("overtime_initiation_departments").insert(deptRows);
+    if(deptErr) throw deptErr;
+
+    const entryRows = Array.from(SELECTED_DEPTS).map(d => ({
+      initiation_id: initRow.id, section: section, department: d, status: "awaiting_step2", cycle: 1
+    }));
+    const { error: entryErr } = await sb.from("overtime_department_entries").insert(entryRows);
+    if(entryErr) throw entryErr;
+
+    await logActivity("overtime_initiated", ME.username + " initiated overtime " + formNumber + " for " + section + " (" + deptRows.length + " department(s))");
+    status.className = "status ok"; status.textContent = "✅ Saved as " + formNumber + " — sent to " + deptRows.length + " department(s).";
+
+    SELECTED_DEPTS.clear();
+    document.getElementById("proposeHours").value = 11;
+    onSectionChanged();
+    await loadHistory();
+  }catch(e){
+    status.className = "status err"; status.textContent = "❌ " + e.message;
+  }
+}
+
+async function loadHistory(){
+  const wrap = document.getElementById("historyWrap");
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+  wrap.innerHTML = "<p>Loading...</p>";
+
+  try{
+    let q = sb.from("overtime_initiations").select("*").order("created_at", { ascending: false });
+    if(ME.role !== "super_admin"){
+      if(ME.sectionNames && ME.sectionNames.length){ q = q.in("section", ME.sectionNames); }
+      else { q = q.eq("section", "___none___"); }
+    }
+    if(from) q = q.gte("form_date", from);
+    if(to) q = q.lte("form_date", to);
+
+    const { data, error } = await q;
+    if(error) throw error;
+    ALL_HISTORY = data || [];
+
+    if(!ALL_HISTORY.length){ wrap.innerHTML = "<p>No overtime initiations match.</p>"; return; }
+
+    const ids = ALL_HISTORY.map(r=>r.id);
+    const { data: deptRows } = await sb.from("overtime_initiation_departments").select("initiation_id, department").in("initiation_id", ids);
+    let deptsByInit = {};
+    (deptRows||[]).forEach(d=>{ if(!deptsByInit[d.initiation_id]) deptsByInit[d.initiation_id]=[]; deptsByInit[d.initiation_id].push(d.department); });
+
+    let html = "<table><thead><tr><th>Form No.</th><th>Form Date</th><th>Overtime Date</th><th>Section</th><th>Departments</th><th>Hours</th><th>Initiator</th><th>Open</th></tr></thead><tbody>";
+    ALL_HISTORY.forEach(r=>{
+      html += "<tr>" +
+        "<td>" + r.form_number + "</td>" +
+        "<td>" + r.form_date + "</td>" +
+        "<td>" + r.overtime_date + "</td>" +
+        "<td>" + r.section + "</td>" +
+        "<td>" + (deptsByInit[r.id]||[]).join(", ") + "</td>" +
+        "<td>" + r.propose_hours + "</td>" +
+        "<td>" + r.initiator_username + "</td>" +
+        "<td><button class=\"mini\" onclick=\"openPDF(" + r.id + ")\">Open / PDF</button></td>" +
+        "</tr>";
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+  }catch(e){
+    wrap.innerHTML = "<p style='color:var(--red);'>❌ " + e.message + "</p>";
+  }
+}
+
+async function openPDF(id){
+  const r = ALL_HISTORY.find(x => x.id === id);
+  if(!r) return;
+  const { data: deptRows } = await sb.from("overtime_initiation_departments").select("department").eq("initiation_id", id);
+  const depts = (deptRows||[]).map(d=>d.department).join(", ");
+
+  const html = `
+<html><head><style>
+@page { size:A4; margin:40pt 50pt; }
+body { font-family:"Times New Roman", serif; font-size:12pt; margin:0; padding:40px; color:#000; }
+h2 { text-align:center; font-size:18pt; margin:0 0 4px; }
+h3 { text-align:center; font-size:14pt; margin:0 0 24px; letter-spacing:2px; }
+table { width:100%; border-collapse:collapse; margin-top:10px; }
+td { padding:8px 10px; border:1px solid #000; vertical-align:top; }
+td.k { width:32%; font-weight:bold; background:#f0f0f0; }
+</style></head><body>
+<h2>${COMPANY}</h2>
+<h3>OVERTIME INITIATION FORM</h3>
+<table>
+<tr><td class="k">Form No.</td><td>${r.form_number}</td></tr>
+<tr><td class="k">Form Date</td><td>${r.form_date}</td></tr>
+<tr><td class="k">Date of Overtime</td><td>${r.overtime_date}</td></tr>
+<tr><td class="k">Section (Branch)</td><td>${r.section}</td></tr>
+<tr><td class="k">Departments</td><td>${depts}</td></tr>
+<tr><td class="k">Propose Hours</td><td>${r.propose_hours}</td></tr>
+<tr><td class="k">Initiator</td><td>${r.initiator_username}</td></tr>
+</table>
+</body></html>`;
+
+  const w = window.open("", "_blank");
+  w.document.write(html);
+  w.document.close();
+  w.onload = function(){ w.focus(); w.print(); };
+}
+
+init();
+</script>
+<script src="../../assets/letterhead.js"></script>
+</body>
+</html>

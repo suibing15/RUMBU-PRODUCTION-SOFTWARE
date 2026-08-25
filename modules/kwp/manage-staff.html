@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head> 
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KWP — Staff &amp; Shift Management</title>
@@ -35,6 +35,13 @@
   .roster-card{flex:1;min-width:180px;background:var(--bg);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:14px 16px;text-align:center;}
   .roster-card .shift-name{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
   .roster-card .team{font-size:22px;font-weight:800;color:var(--heading);margin-top:4px;}
+  .emp-result{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:8px;margin-top:6px;cursor:pointer;background:var(--card);}
+  .emp-result:hover{background:var(--bg);}
+  .emp-result .n{font-weight:700;color:var(--heading);}
+  .emp-result .m{font-size:12px;color:var(--muted);}
+  .emp-result.linked{opacity:.55;cursor:not-allowed;}
+  .picked-box{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--radius-sm);padding:12px 14px;margin:10px 0;}
+  .picked-box.empty{color:var(--muted);font-size:13px;}
 </style>
 </head>
 <body>
@@ -54,43 +61,58 @@
 
   <div class="card-panel" id="staffFormPanel" style="display:none;">
     <h3 id="staffFormTitle">Add Staff</h3>
-    <p class="sub">New staff are created as <b>Pending Verification</b> by default (spec §67 migration rule) — set Active only once KWP/HR has verified the record.</p>
-    <input type="hidden" id="s_id">
-    <div class="form-row">
-      <div class="field"><label>Employee ID (login identifier)</label><input id="s_employee_id" placeholder="e.g. RB578"></div>
-      <div class="field"><label>Full Name</label><input id="s_full_name"></div>
-    </div>
-    <div class="form-row-3">
-      <div class="field"><label>Role</label>
-        <select id="s_role">
-          <option>Worker</option><option>Operator</option><option>Shift Leader</option>
-          <option>Quality Control</option><option>Technical</option>
-          <option>Head of Production</option><option>Plant Manager</option><option>Management</option>
-        </select>
+    <p class="sub">KWP staff are linked to existing records in the central <b>Employees</b> directory — the same one Weaving and Overtime use — not typed in from scratch. New staff are created as <b>Pending Verification</b> by default (spec §67 migration rule); set Active only once KWP/HR has verified the record.</p>
+
+    <div id="employeeSearchBlock">
+      <div class="field"><label>Search Employees (name or Employee ID)</label>
+        <input id="emp_search_box" placeholder="Start typing..." oninput="searchEmployees()">
       </div>
-      <div class="field"><label>Shift Team</label>
-        <select id="s_shift_team"><option value="">— Unassigned —</option><option value="A">Shift A</option><option value="B">Shift B</option></select>
-      </div>
-      <div class="field"><label>Status</label>
-        <select id="s_status"><option>Pending Verification</option><option>Active</option><option>Inactive</option><option>Suspended</option></select>
+      <div id="empSearchResults"></div>
+      <div class="pending-note" id="empNoMatchNote" style="display:none;">
+        No matching employee found in the Employees directory, or every match is already linked to a KWP staff record.
+        Ask HR/Admin to add this person to Employees first (in Supabase), then search again.
       </div>
     </div>
-    <div class="form-row-3">
-      <div class="field"><label>Department</label><input id="s_department" value="Kano Wash Plant"></div>
-      <div class="field"><label>Employment Date</label><input type="date" id="s_employment_date"></div>
-      <div class="field"><label>Employment Type</label><input id="s_employment_type" placeholder="e.g. Permanent, Casual"></div>
+
+    <div id="pickedEmployeeBox" class="picked-box empty" style="display:none;"></div>
+
+    <div id="kwpFieldsBlock" style="display:none;">
+      <input type="hidden" id="s_id">
+      <input type="hidden" id="s_employee_ref_id">
+      <input type="hidden" id="s_employee_id">
+      <input type="hidden" id="s_full_name">
+      <div class="form-row-3">
+        <div class="field"><label>Role</label>
+          <select id="s_role">
+            <option>Worker</option><option>Operator</option><option>Shift Leader</option>
+            <option>Quality Control</option><option>Technical</option>
+            <option>Head of Production</option><option>Plant Manager</option><option>Management</option>
+          </select>
+        </div>
+        <div class="field"><label>Shift Team</label>
+          <select id="s_shift_team"><option value="">— Unassigned —</option><option value="A">Shift A</option><option value="B">Shift B</option></select>
+        </div>
+        <div class="field"><label>Status</label>
+          <select id="s_status"><option>Pending Verification</option><option>Active</option><option>Inactive</option><option>Suspended</option></select>
+        </div>
+      </div>
+      <div class="form-row-3">
+        <div class="field"><label>Department (KWP record)</label><input id="s_department" value="Kano Wash Plant"></div>
+        <div class="field"><label>Employment Date</label><input type="date" id="s_employment_date"></div>
+        <div class="field"><label>Employment Type</label><input id="s_employment_type" placeholder="e.g. Permanent, Casual"></div>
+      </div>
+      <div class="form-row-3">
+        <div class="field"><label>Phone</label><input id="s_phone"></div>
+        <div class="field"><label>Email</label><input id="s_email"></div>
+        <div class="field"><label>Supervisor</label><select id="s_supervisor_id"><option value="">— None —</option></select></div>
+      </div>
+      <div class="field"><label>Notes</label><textarea id="s_notes"></textarea></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="saveStaff()">Save Staff</button>
+        <button class="btn-ghost" onclick="closeStaffForm()">Cancel</button>
+      </div>
+      <div class="status" id="staffFormStatus"></div>
     </div>
-    <div class="form-row-3">
-      <div class="field"><label>Phone</label><input id="s_phone"></div>
-      <div class="field"><label>Email</label><input id="s_email"></div>
-      <div class="field"><label>Supervisor</label><select id="s_supervisor_id"><option value="">— None —</option></select></div>
-    </div>
-    <div class="field"><label>Notes</label><textarea id="s_notes"></textarea></div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="saveStaff()">Save Staff</button>
-      <button class="btn-ghost" onclick="closeStaffForm()">Cancel</button>
-    </div>
-    <div class="status" id="staffFormStatus"></div>
   </div>
 
   <div class="toolbar">
@@ -181,9 +203,22 @@
 </div>
 
 <script>
+const EDGE_FUNCTION_URL = "https://betfhunzmhtdzgvufmfk.supabase.co/functions/v1/swift-handler";
 let ME = null;
+let ACCESS_TOKEN = null;
 let IS_MANAGER = false;
 let STAFF = [];
+
+async function callEdgeFunction(payload){
+  const res = await fetch(EDGE_FUNCTION_URL, {
+    method: "post",
+    headers: { "Authorization": "Bearer " + ACCESS_TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
 
 function showTab(id){
   document.querySelectorAll(".tab-content").forEach(el=>el.classList.toggle("active", el.id === id));
@@ -196,6 +231,10 @@ async function init(){
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
+
+    const { data: sessData, error: sessErr } = await sb.auth.getSession();
+    if(sessErr) throw new Error("Could not get session: " + sessErr.message);
+    ACCESS_TOKEN = sessData.session.access_token;
 
     const { data: mgr, error: mgrErr } = await sb.rpc("kwp_is_manager");
     if(mgrErr) throw new Error("Could not check permissions: " + mgrErr.message);
@@ -224,6 +263,7 @@ async function loadStaff(){
   const { data, error } = await sb.from("kwp_staff").select("*").order("full_name");
   if(error){ document.getElementById("staffTableBody").innerHTML = "<tr><td colspan='8'>Error: " + error.message + "</td></tr>"; return; }
   STAFF = data || [];
+  LINKED_EMPLOYEE_REF_IDS = new Set(STAFF.map(s=>s.employee_ref_id).filter(Boolean));
   const supSel = document.getElementById("s_supervisor_id");
   supSel.innerHTML = '<option value="">— None —</option>' +
     STAFF.map(s => `<option value="${s.id}">${s.full_name} (${s.employee_id})</option>`).join("");
@@ -247,15 +287,27 @@ function renderStaffTable(){
     <td>${s.shift_team ? "Shift " + s.shift_team : "—"}</td>
     <td><span class="tag" style="background:${s.status==='Active'?'var(--ok)':s.status==='Suspended'?'var(--bad)':'var(--warn)'}">${s.status}</span></td>
     <td>${s.phone || "—"}</td>
-    <td>${s.profile_id ? "Linked" : "— none —"}</td>
+    <td>${s.profile_id
+        ? (IS_MANAGER ? `Linked &nbsp;<button class="btn-sm btn-ghost" onclick="resetStaffPassword(${s.id})">Reset Password</button>` : "Linked")
+        : (IS_MANAGER ? `<button class="btn-sm btn-ghost" onclick="grantLoginAccess(${s.id})">Grant Login Access</button>` : "— none —")}</td>
     <td>${IS_MANAGER ? `<button class="btn-sm btn-ghost" onclick="editStaff(${s.id})">Edit</button>` : ""}</td>
   </tr>`).join("");
 }
 window.renderStaffTable = renderStaffTable;
 
+let PICKED_EMPLOYEE = null; // {id, employee_id, full_name, department, branch, rank}
+let LINKED_EMPLOYEE_REF_IDS = new Set(); // employees.id already linked to a kwp_staff row
+
 function openStaffForm(){
   document.getElementById("staffFormTitle").textContent = "Add Staff";
-  ["s_id","s_employee_id","s_full_name","s_department","s_employment_date","s_employment_type","s_phone","s_email","s_notes"]
+  document.getElementById("employeeSearchBlock").style.display = "block";
+  document.getElementById("emp_search_box").value = "";
+  document.getElementById("empSearchResults").innerHTML = "";
+  document.getElementById("empNoMatchNote").style.display = "none";
+  PICKED_EMPLOYEE = null;
+  document.getElementById("pickedEmployeeBox").style.display = "none";
+  document.getElementById("kwpFieldsBlock").style.display = "none";
+  ["s_id","s_employee_ref_id","s_employee_id","s_full_name","s_employment_date","s_employment_type","s_phone","s_email","s_notes"]
     .forEach(id => document.getElementById(id).value = "");
   document.getElementById("s_department").value = "Kano Wash Plant";
   document.getElementById("s_role").value = "Worker";
@@ -267,11 +319,77 @@ function openStaffForm(){
 }
 window.openStaffForm = openStaffForm;
 
+let searchDebounce = null;
+function searchEmployees(){
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(runEmployeeSearch, 250);
+}
+window.searchEmployees = searchEmployees;
+
+async function runEmployeeSearch(){
+  const q = document.getElementById("emp_search_box").value.trim();
+  const resultsEl = document.getElementById("empSearchResults");
+  const noMatch = document.getElementById("empNoMatchNote");
+  if(q.length < 2){ resultsEl.innerHTML = ""; noMatch.style.display = "none"; return; }
+
+  const { data, error } = await sb.from("employees")
+    .select("id, employee_id, full_name, department, branch, rank")
+    .or(`full_name.ilike.%${q}%,employee_id.ilike.%${q}%`)
+    .order("full_name").limit(15);
+
+  if(error){ resultsEl.innerHTML = "<p class='sub'>Search error: " + error.message + "</p>"; return; }
+  const rows = data || [];
+  noMatch.style.display = rows.length ? "none" : "block";
+  resultsEl.innerHTML = rows.map(e=>{
+    const isLinked = LINKED_EMPLOYEE_REF_IDS.has(e.id);
+    const meta = e.employee_id + " · " + (e.department||"") + (e.branch ? " · " + e.branch : "");
+    return `<div class="emp-result ${isLinked?'linked':''}" ${isLinked?'':`onclick='pickEmployee(${JSON.stringify(e).replace(/'/g,"&apos;")})'`}>
+      <div><div class="n">${e.full_name}</div><div class="m">${meta}</div></div>
+      <div class="m">${isLinked ? "Already a KWP staff record" : "Select →"}</div>
+    </div>`;
+  }).join("");
+}
+window.runEmployeeSearch = runEmployeeSearch;
+
+function pickEmployee(emp){
+  PICKED_EMPLOYEE = emp;
+  document.getElementById("s_employee_ref_id").value = emp.id;
+  document.getElementById("s_employee_id").value = emp.employee_id;
+  document.getElementById("s_full_name").value = emp.full_name;
+  const box = document.getElementById("pickedEmployeeBox");
+  box.classList.remove("empty");
+  box.style.display = "block";
+  box.innerHTML = `Linking: <b>${emp.full_name}</b> (${emp.employee_id}) — ${emp.department||""}${emp.branch?", "+emp.branch:""} &nbsp;
+    <button class="btn-sm btn-ghost" type="button" onclick="unpickEmployee()">Change</button>`;
+  document.getElementById("employeeSearchBlock").style.display = "none";
+  document.getElementById("kwpFieldsBlock").style.display = "block";
+}
+window.pickEmployee = pickEmployee;
+
+function unpickEmployee(){
+  PICKED_EMPLOYEE = null;
+  document.getElementById("s_employee_ref_id").value = "";
+  document.getElementById("s_employee_id").value = "";
+  document.getElementById("s_full_name").value = "";
+  document.getElementById("pickedEmployeeBox").style.display = "none";
+  document.getElementById("kwpFieldsBlock").style.display = "none";
+  document.getElementById("employeeSearchBlock").style.display = "block";
+}
+window.unpickEmployee = unpickEmployee;
+
 function editStaff(id){
   const s = STAFF.find(x=>x.id === id);
   if(!s) return;
   document.getElementById("staffFormTitle").textContent = "Edit Staff — " + s.full_name;
+  document.getElementById("employeeSearchBlock").style.display = "none";
+  document.getElementById("kwpFieldsBlock").style.display = "block";
+  const box = document.getElementById("pickedEmployeeBox");
+  box.classList.remove("empty");
+  box.style.display = "block";
+  box.innerHTML = `Linked employee: <b>${s.full_name}</b> (${s.employee_id}) — not editable here; this links to the Employees directory.`;
+
   document.getElementById("s_id").value = s.id;
+  document.getElementById("s_employee_ref_id").value = s.employee_ref_id || "";
   document.getElementById("s_employee_id").value = s.employee_id;
   document.getElementById("s_full_name").value = s.full_name;
   document.getElementById("s_role").value = s.role;
@@ -295,12 +413,12 @@ window.closeStaffForm = closeStaffForm;
 async function saveStaff(){
   const status = document.getElementById("staffFormStatus");
   const id = document.getElementById("s_id").value;
+  const employee_ref_id = document.getElementById("s_employee_ref_id").value;
   const employee_id = document.getElementById("s_employee_id").value.trim();
   const full_name = document.getElementById("s_full_name").value.trim();
-  if(!employee_id || !full_name){ status.className="status err"; status.textContent="Employee ID and Full Name are required."; return; }
+  if(!id && !employee_ref_id){ status.className="status err"; status.textContent="Search for and select an employee first."; return; }
 
   const payload = {
-    employee_id, full_name,
     role: document.getElementById("s_role").value,
     shift_team: document.getElementById("s_shift_team").value || null,
     status: document.getElementById("s_status").value,
@@ -312,6 +430,11 @@ async function saveStaff(){
     supervisor_id: document.getElementById("s_supervisor_id").value || null,
     notes: document.getElementById("s_notes").value.trim() || null
   };
+  if(!id){
+    payload.employee_ref_id = Number(employee_ref_id);
+    payload.employee_id = employee_id;
+    payload.full_name = full_name;
+  }
 
   status.className = "status"; status.textContent = "Saving...";
   try{
@@ -326,7 +449,12 @@ async function saveStaff(){
     } else {
       payload.created_by = ME.id;
       const { data: inserted, error } = await sb.from("kwp_staff").insert(payload).select("id").single();
-      if(error) throw error;
+      if(error){
+        if(String(error.message||"").includes("uq_kwp_staff_employee_ref_id")){
+          throw new Error("That employee is already linked to a KWP staff record.");
+        }
+        throw error;
+      }
       staffId = inserted.id;
       await logAudit("staff_created", "kwp_staff", String(staffId), null, payload);
     }
@@ -448,6 +576,62 @@ async function saveTarget(){
   }
 }
 window.saveTarget = saveTarget;
+
+// ---------------- LOGIN ACCESS (Phase 2) ----------------
+// Creates the Supabase Auth account for this staff member via the same
+// edge function manage-accounts.html already uses, using Employee ID as
+// the login username (resolve_username_to_email() handles the rest —
+// no login.html changes needed). The temporary password is typed by the
+// manager here, never shown again, and the account is immediately
+// flagged must_change_password so the worker is forced to set their own
+// password on first login.
+async function grantLoginAccess(staffId){
+  const s = STAFF.find(x=>x.id === staffId);
+  if(!s) return;
+  const tempPassword = prompt("Set a temporary password for " + s.full_name + " (" + s.employee_id + "). At least 6 characters. The worker will be required to change it on first login.");
+  if(tempPassword === null) return;
+  if(tempPassword.length < 6){ alert("Password must be at least 6 characters."); return; }
+
+  try{
+    const res = await callEdgeFunction({ action:"create_user", username: s.employee_id, password: tempPassword });
+    const { error: rpcErr } = await sb.rpc("kwp_mark_password_reset", { target_profile_id: res.id });
+    if(rpcErr) throw rpcErr;
+    const { error: linkErr } = await sb.from("kwp_staff").update({ profile_id: res.id }).eq("id", staffId);
+    if(linkErr) throw linkErr;
+    if(s.employee_ref_id){
+      try{ await callEdgeFunction({ action:"link_employee", employee_id: s.employee_ref_id, profile_id: res.id }); }
+      catch(e){ console.warn("employees.linked_profile_id sync failed (non-fatal):", e.message||e); }
+    }
+    await logAudit("kwp_login_access_granted", "kwp_staff", String(staffId), null, { employee_id: s.employee_id, profile_id: res.id });
+    alert("✅ Login access granted for " + s.employee_id + ". They must change their password on first login.");
+    await loadStaff();
+  }catch(e){
+    alert("❌ Could not grant login access: " + (e.message||e));
+  }
+}
+window.grantLoginAccess = grantLoginAccess;
+
+// Sets a new temporary password on an already-linked account (real Auth
+// password change happens via the edge function's admin_reset_password
+// action, same as manage-accounts.html) and forces a change on next login.
+async function resetStaffPassword(staffId){
+  const s = STAFF.find(x=>x.id === staffId);
+  if(!s || !s.profile_id) return;
+  const tempPassword = prompt("Set a new temporary password for " + s.full_name + " (" + s.employee_id + "). At least 6 characters. They will be required to change it on next login.");
+  if(tempPassword === null) return;
+  if(tempPassword.length < 6){ alert("Password must be at least 6 characters."); return; }
+
+  try{
+    await callEdgeFunction({ action:"admin_reset_password", target_id: s.profile_id, new_password: tempPassword });
+    const { error: rpcErr } = await sb.rpc("kwp_mark_password_reset", { target_profile_id: s.profile_id });
+    if(rpcErr) throw rpcErr;
+    await logAudit("kwp_password_reset", "kwp_staff", String(staffId), null, { employee_id: s.employee_id });
+    alert("✅ Password reset for " + s.employee_id + ". They must change it on next login.");
+  }catch(e){
+    alert("❌ Could not reset password: " + (e.message||e));
+  }
+}
+window.resetStaffPassword = resetStaffPassword;
 
 // ---------------- AUDIT ----------------
 async function logAudit(action, entityType, entityId, oldValue, newValue){

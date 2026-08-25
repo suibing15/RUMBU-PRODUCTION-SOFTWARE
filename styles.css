@@ -71,7 +71,38 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text); font-si
 .menu-flat .m-label{display:flex;align-items:center;gap:10px;min-width:0;}
 .menu-flat .m-icon{width:17px;height:17px;flex:0 0 17px;display:inline-flex;color:var(--side-muted);}
 .menu-flat .m-icon svg{width:100%;height:100%;}
-.menu-flat .chev{font-size:16px;opacity:.55;flex:0 0 auto;}
+.menu-flat .chev{font-size:16px;opacity:.55;flex:0 0 auto;transition:transform .15s ease,opacity .15s ease;}
+/* Active module (its page menu is flown out to the side) */
+.menu-flat.active{background:var(--side-active-bg);color:var(--side-active-fg);}
+.menu-flat.active .m-icon{color:var(--side-active-fg);}
+.menu-flat.active .chev{opacity:1;color:var(--side-active-fg);}
+
+/* ============================================================
+   SIDE FLYOUT SUBMENU
+   Selecting a module slides its pages out beside the sidebar
+   (from the side, not a dropdown below and not a full card screen).
+   Positioned in JS relative to the clicked module button.
+   ============================================================ */
+.side-flyout{
+  position:fixed;z-index:50;width:236px;max-height:76vh;overflow-y:auto;
+  background:var(--card);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 14px 38px rgba(15,25,45,.30);
+  padding:7px;display:none;opacity:0;transform:translateX(-8px);
+  transition:opacity .15s ease,transform .15s ease;
+}
+.side-flyout.show{display:block;opacity:1;transform:translateX(0);}
+.side-flyout::-webkit-scrollbar{width:8px;}
+.side-flyout::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:4px;}
+.side-flyout .fly-head{font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);padding:9px 11px 7px;}
+.flyout-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  background:transparent;border:0;border-radius:8px;padding:10px 11px;cursor:pointer;
+  font-family:inherit;font-size:13.5px;font-weight:600;color:var(--heading);text-align:left;
+  transition:background .12s ease;
+}
+.flyout-item:hover{background:var(--bg);}
+.flyout-item .fi-arrow{color:var(--accent);font-size:15px;flex:0 0 auto;}
+.flyout-empty{padding:12px 11px;font-size:12.5px;color:var(--muted);}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
 .app-header{height:var(--header-h);flex:0 0 var(--header-h);background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 18px;z-index:20;}
@@ -99,15 +130,32 @@ body { font-family:var(--sans); background:var(--bg); color:var(--text); font-si
 .module-host .m-bar .m-title .m-icon svg{width:100%;height:100%;}
 .module-host iframe{flex:1;width:100%;max-width:1320px;border:0;background:var(--bg);}
 
+/* Quick-links bar: sibling pages of the active module */
+.module-host .quick-links{
+  align-self:stretch;flex:0 0 auto;display:flex;align-items:center;gap:7px;
+  padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line);
+  overflow-x:auto;overflow-y:hidden;white-space:nowrap;-webkit-overflow-scrolling:touch;
+}
+.module-host .quick-links::-webkit-scrollbar{height:6px;}
+.module-host .quick-links::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:3px;}
+.quick-links .ql-label{font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);flex:0 0 auto;padding-right:4px;}
+.quick-links .ql-item{
+  flex:0 0 auto;background:var(--bg);border:1px solid var(--line-2);color:var(--heading);
+  border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:background .12s ease,border-color .12s ease,color .12s ease;
+}
+.quick-links .ql-item:hover{border-color:var(--accent);}
+.quick-links .ql-item.active{background:var(--accent);color:var(--logo-fg);border-color:var(--accent);}
+
 /* Module picker — the "fresh card" screen a module opens into, instead
    of an inline sidebar dropdown. Its cards then open a page normally.
    Cards are fixed-width and centered as a cluster in the middle of the
    screen (not stretched edge-to-edge) — reads like a deliberate menu of
    choices rather than a full-bleed data grid. */
 .picker-scroll{flex:1;overflow:auto;}
-.picker-grid{display:flex;flex-direction:column;align-items:center;gap:14px;padding:40px 22px;max-width:440px;margin:0 auto;}
+.picker-grid{display:flex;flex-wrap:wrap;justify-content:center;align-items:stretch;gap:16px;padding:40px 22px;max-width:920px;margin:0 auto;}
 .page-card{
-  width:100%;
+  flex:0 0 200px;width:200px;
   display:flex;align-items:center;justify-content:space-between;gap:10px;
   background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
   padding:18px 18px;box-shadow:var(--shadow);cursor:pointer;font-family:inherit;text-align:left;
@@ -188,6 +236,9 @@ tbody tr:hover{background:rgba(127,127,127,.08);}
 @media(max-width:900px){
   .content-inner{padding:16px;}
   .picker-grid{padding:20px 16px;max-width:100%;}
+}
+@media(max-width:520px){
+  .page-card{flex:1 1 140px;width:auto;min-width:140px;}
 }
 
 /* ============================================================

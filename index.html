@@ -34,6 +34,9 @@
 
 <div class="overlay" id="overlay" onclick="closeDrawer()"></div>
 
+<!-- Side flyout submenu: a module's pages slide out beside the sidebar -->
+<div class="side-flyout" id="sideFlyout"></div>
+
 <div class="app" id="appShell">
 
 <!-- SIDEBAR -->
@@ -45,7 +48,7 @@
   </div>
   <div class="side-scroll">
 
-  <button class="menu-flat" data-group-name="Manage Accounts" onclick="openAccountPicker()">
+  <button class="menu-flat" data-group-name="Manage Accounts" onclick="openAccountPicker(event)">
     <span class="m-label"><span class="m-icon" id="iconAccount"></span><span>MANAGE ACCOUNTS</span></span><span class="chev">&rsaquo;</span>
   </button>
 
@@ -111,6 +114,9 @@
         <button class="m-back" onclick="closeModule()" id="moduleBackBtn">&larr; Back to Dashboards</button>
         <span class="m-title" id="moduleName"></span>
       </div>
+      <!-- Quick links: every page in the current module, for jumping
+           between sibling pages without returning to the sidebar. -->
+      <div class="quick-links" id="quickLinks" style="display:none;"></div>
       <iframe id="moduleFrame" title="Module"></iframe>
     </div>
   </div>
@@ -135,6 +141,7 @@
   function closeDrawer(){
     document.getElementById("side").classList.remove("open");
     document.getElementById("overlay").classList.remove("show");
+    hideFlyout();
   }
   function toggleGroup(id) {
     // Kept as a harmless no-op for backward compatibility — the sidebar
@@ -229,7 +236,7 @@
         if(!modPages.length) return; // skip empty module categories
         MODULE_PAGES_BY_MODULE[m.name] = modPages;
         const safeName = m.name.replace(/'/g,"\\'");
-        html += `<button class="menu-flat" data-group-name="${m.name.replace(/"/g,"&quot;")}" onclick="openPagePicker('${safeName}')">` +
+        html += `<button class="menu-flat" data-group-name="${m.name.replace(/"/g,"&quot;")}" onclick="openPagePicker('${safeName}', event)">` +
           `<span class="m-label"><span class="m-icon">${iconSvgFor(m.name)}</span><span>${m.name.toUpperCase()}</span></span><span class="chev">&rsaquo;</span></button>`;
       });
 
@@ -261,31 +268,37 @@
   // ---- Page picker ("fresh card" screen shown instead of an inline
   // sidebar dropdown) ----
   let CURRENT_PICKER = null; // { kind:'module'|'account', name }
+  let CURRENT_PAGE = null;   // "dept/module" of the page open in the iframe
+  let CURRENT_QUERY = "";    // its query string (distinguishes account sub-pages)
 
-  function openPagePicker(moduleName){
-    CURRENT_PICKER = { kind: "module", name: moduleName };
-    renderPicker();
-    showPickerView(moduleName);
+  // ---- Side flyout submenu ----------------------------------------
+  // Selecting a module no longer opens a full-screen card screen; it
+  // slides that module's pages out in a panel BESIDE the sidebar. A
+  // second click on the same module (or clicking away) closes it.
+  function openPagePicker(moduleName, ev){ openSideMenu("module", moduleName, ev); }
+  function openAccountPicker(ev){ openSideMenu("account", "Manage Accounts", ev); }
+
+  function openSideMenu(kind, name, ev){
+    const anchor = ev && (ev.currentTarget || ev.target)
+      ? (ev.currentTarget || ev.target).closest(".menu-flat") : null;
+    const fly = document.getElementById("sideFlyout");
+    // Toggle: clicking the module whose menu is already open closes it.
+    if(fly.classList.contains("show") && CURRENT_PICKER &&
+       CURRENT_PICKER.kind === kind && CURRENT_PICKER.name === name){
+      hideFlyout();
+      return;
+    }
+    CURRENT_PICKER = { kind, name };
+    renderFlyout();
+    fly.classList.add("show");
+    if(anchor) positionFlyout(anchor);
+    document.querySelectorAll(".menu-flat.active").forEach(b=>b.classList.remove("active"));
+    if(anchor) anchor.classList.add("active");
   }
 
-  function openAccountPicker(){
-    CURRENT_PICKER = { kind: "account", name: "Manage Accounts" };
-    renderPicker();
-    showPickerView("Manage Accounts");
-  }
-
-  function showPickerView(title){
-    document.getElementById("pickerIcon").innerHTML = iconSvgFor(title);
-    document.getElementById("pickerTitleText").textContent = title.toUpperCase();
-    document.getElementById("moduleView").classList.remove("show");
-    document.getElementById("pickerView").classList.add("show");
-    document.getElementById("landing").style.display = "none";
-    document.getElementById("appShell").classList.add("module-open");
-    closeDrawer();
-  }
-
-  function renderPicker(){
-    const grid = document.getElementById("pickerGrid");
+  function renderFlyout(){
+    const fly = document.getElementById("sideFlyout");
+    if(!CURRENT_PICKER){ fly.innerHTML = ""; return; }
     let items = [];
     if(CURRENT_PICKER.kind === "account"){
       items = ACCOUNT_PAGES.filter(accountPageAllowed).map(p=>({
@@ -300,21 +313,79 @@
         return { label: p.name, onclick: `openModule(null,'${parts[0]}','${parts[1]}','${p.name.replace(/'/g,"\\'")}')` };
       });
     }
+    const head = `<div class="fly-head">${CURRENT_PICKER.name}</div>`;
     if(!items.length){
-      grid.innerHTML = "<p class='sub' style='padding:4px 2px;'>Nothing available here for your current Branch yet.</p>";
+      fly.innerHTML = head + "<div class='flyout-empty'>Nothing available here for your current Branch yet.</div>";
       return;
     }
-    grid.innerHTML = items.map(it=>
-      `<button class="page-card" onclick="${it.onclick}"><span class="pc-label">${it.label}</span><span class="pc-arrow">&rarr;</span></button>`
+    fly.innerHTML = head + items.map(it=>
+      `<button class="flyout-item" onclick="${it.onclick}"><span>${it.label}</span><span class="fi-arrow">&rarr;</span></button>`
     ).join("");
   }
 
-  function closePicker(){
-    document.getElementById("pickerView").classList.remove("show");
-    document.getElementById("appShell").classList.remove("module-open");
-    document.getElementById("landing").style.display = "";
-    CURRENT_PICKER = null;
+  // Anchor the flyout to the right edge of the sidebar, vertically near
+  // the clicked module button, clamped to stay on-screen.
+  function positionFlyout(anchor){
+    const fly = document.getElementById("sideFlyout");
+    const side = document.getElementById("side");
+    const sr = side.getBoundingClientRect();
+    const ar = anchor.getBoundingClientRect();
+    const fw = fly.offsetWidth, fh = fly.offsetHeight;
+    let left = sr.right + 6;
+    const maxLeft = window.innerWidth - fw - 8;
+    if(left > maxLeft) left = Math.max(8, maxLeft);
+    let top = ar.top;
+    const maxTop = window.innerHeight - fh - 8;
+    if(top > maxTop) top = Math.max(8, maxTop);
+    fly.style.left = left + "px";
+    fly.style.top = top + "px";
   }
+
+  function hideFlyout(){
+    const fly = document.getElementById("sideFlyout");
+    if(fly) fly.classList.remove("show");
+    document.querySelectorAll(".menu-flat.active").forEach(b=>b.classList.remove("active"));
+  }
+
+  // ---- Quick links inside an open module ----------------------------
+  // When a page is open, show every page in that same module as a pill
+  // bar so the user can jump between sibling pages in place. The active
+  // page's pill is highlighted. Hidden when a module has only one page.
+  function renderQuickLinks(){
+    const bar = document.getElementById("quickLinks");
+    if(!bar) return;
+    let items = [];
+    if(CURRENT_PICKER && CURRENT_PICKER.kind === "account"){
+      items = ACCOUNT_PAGES.filter(accountPageAllowed).map(p=>({
+        label: p.name, dept: p.dept, mod: p.mod, query: p.query || ""
+      }));
+    } else if(CURRENT_PICKER){
+      const allowed = BRANCH_PATHS[CURRENT_BRANCH] || new Set();
+      const pages = (MODULE_PAGES_BY_MODULE[CURRENT_PICKER.name] || []).filter(p => allowed.has(p.module_path));
+      items = pages.map(p=>{ const parts = p.module_path.split("/"); return { label: p.name, dept: parts[0], mod: parts[1], query: "" }; });
+    }
+    if(items.length <= 1){ bar.innerHTML = ""; bar.style.display = "none"; return; }
+    bar.style.display = "";
+    const head = CURRENT_PICKER ? `<span class="ql-label">${CURRENT_PICKER.name}</span>` : "";
+    bar.innerHTML = head + items.map(it=>{
+      const active = ((it.dept + "/" + it.mod) === CURRENT_PAGE) && ((it.query || "") === (CURRENT_QUERY || ""));
+      const oc = `openModule(null,'${it.dept}','${it.mod}','${it.label.replace(/'/g,"\\'")}','${it.query || ""}')`;
+      return `<button class="ql-item${active ? " active" : ""}" onclick="${oc}">${it.label}</button>`;
+    }).join("");
+    // Keep the active pill in view.
+    const act = bar.querySelector(".ql-item.active");
+    if(act && act.scrollIntoView) act.scrollIntoView({inline:"nearest", block:"nearest"});
+  }
+
+  // Close on Escape; re-anchor on resize so it never drifts off-screen.
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape") hideFlyout(); });
+  window.addEventListener("resize", function(){
+    const fly = document.getElementById("sideFlyout");
+    if(fly && fly.classList.contains("show")){
+      const active = document.querySelector(".menu-flat.active");
+      if(active) positionFlyout(active); else hideFlyout();
+    }
+  });
 
   function openModule(btn, dept, module, label, query) {
     const view = document.getElementById("moduleView");
@@ -324,11 +395,14 @@
     // If a button exists at all, it came from the pages table via
     // renderSidebarModules() — meaning it's registered and ready, no
     // separate READY_MODULES whitelist needed anymore.
+    hideFlyout();
     frame.src = "modules/" + dept + "/" + module + ".html" + (query ? ("?" + query) : "");
     name.textContent = label || "";
-    document.getElementById("moduleBackBtn").textContent = CURRENT_PICKER
-      ? ("← Back to " + CURRENT_PICKER.name.toUpperCase())
-      : "← Back to Dashboards";
+    document.getElementById("moduleBackBtn").textContent = "← Back to Dashboards";
+    // Remember which page is open so the quick-links bar can highlight it.
+    CURRENT_PAGE = dept + "/" + module;
+    CURRENT_QUERY = query || "";
+    renderQuickLinks();
     document.getElementById("pickerView").classList.remove("show");
     view.classList.add("show");
     document.getElementById("landing").style.display = "none";
@@ -345,14 +419,9 @@
   function closeModule(){
     document.getElementById("moduleView").classList.remove("show");
     document.getElementById("moduleFrame").src = "about:blank";
-    if(CURRENT_PICKER){
-      // Came from a module/account card screen — go back there, not all
-      // the way to the dashboard landing.
-      document.getElementById("pickerView").classList.add("show");
-    } else {
-      document.getElementById("landing").style.display = "";
-      document.getElementById("appShell").classList.remove("module-open");
-    }
+    document.getElementById("landing").style.display = "";
+    document.getElementById("appShell").classList.remove("module-open");
+    hideFlyout();
   }
 
   // ---- Sidebar modules are rendered dynamically; ME holds the logged-in profile ----
@@ -542,9 +611,14 @@
       const anyAllowed = pages.some(p => allowed.has(p.module_path));
       btn.style.display = anyAllowed ? "" : "none";
     });
-    // If a module's card screen is open right now, refresh its contents
-    // for the newly selected Branch instead of showing stale pages.
-    if(CURRENT_PICKER && CURRENT_PICKER.kind === "module") renderPicker();
+    // If a module's flyout is open right now, refresh its contents for
+    // the newly selected Branch instead of showing stale pages.
+    const fly = document.getElementById("sideFlyout");
+    if(fly && fly.classList.contains("show") && CURRENT_PICKER && CURRENT_PICKER.kind === "module"){
+      renderFlyout();
+      const active = document.querySelector(".menu-flat.active");
+      if(active) positionFlyout(active);
+    }
   }
 
   // ---- Dashboard landing ----

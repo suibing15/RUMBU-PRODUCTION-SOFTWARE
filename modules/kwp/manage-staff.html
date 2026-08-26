@@ -48,7 +48,7 @@
 <div class="wrap">
 <button onclick="(window.parent&&window.parent.closeModule)?window.parent.closeModule():(window.location.href='../../index.html')" style="max-width:220px;margin-bottom:12px;background:var(--accent);color:var(--logo-fg);">&larr; Back to Dashboard</button>
 <div id="connStatus">Loading...</div>
-<div id="roBanner" class="readonly-banner" style="display:none;">You have read-only access to KWP Staff &amp; Shift Management. Adding and changing records is limited to the Plant Manager, Head of Production, and Admin/Super Admin.</div>
+<div id="roBanner" class="readonly-banner" style="display:none;">You have read-only access to KWP Staff &amp; Shift Management. Adding and changing records is limited to Manager, Assistant Manager, Plant Manager, Head (Kano Wash Plant), and Admin/Super Admin.</div>
 
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="tab-staff" onclick="showTab('tab-staff')">Staff</button>
@@ -82,9 +82,19 @@
       <div class="form-row-3">
         <div class="field"><label>KWP Role</label>
           <select id="s_kwp_role">
-            <option>Worker</option><option>Operator</option><option>Shift Leader</option>
-            <option>Quality Control</option><option>Technical</option>
-            <option>Head of Production</option><option>Plant Manager</option><option>Management</option>
+            <option>Junior Worker</option>
+            <option>Operator</option>
+            <option>Shift Leader</option>
+            <option>Store Junior Officer</option>
+            <option>Store Officer</option>
+            <option>Technician/Mechanic</option>
+            <option>Quality Control Personnel</option>
+            <option>Supplier</option>
+            <option>Head of Unit</option>
+            <option>Assistant Manager</option>
+            <option>Manager</option>
+            <option>Plant Manager</option>
+            <option>Head, Kano Wash Plant</option>
           </select>
         </div>
         <div class="field"><label>Shift Team</label>
@@ -305,7 +315,7 @@ function openStaffForm(){
   document.getElementById("kwpFieldsBlock").style.display = "none";
   ["s_id","s_employee_ref_id","s_employment_date","s_employment_type","s_phone","s_email","s_notes"]
     .forEach(id => document.getElementById(id).value = "");
-  document.getElementById("s_kwp_role").value = "Worker";
+  document.getElementById("s_kwp_role").value = "Junior Worker";
   document.getElementById("s_shift_team").value = "";
   document.getElementById("s_status").value = "Pending Verification";
   document.getElementById("s_supervisor_id").value = "";
@@ -381,7 +391,7 @@ function editStaff(id){
 
   document.getElementById("s_id").value = s.id;
   document.getElementById("s_employee_ref_id").value = s.employee_ref_id;
-  document.getElementById("s_kwp_role").value = s.kwp_role || "Worker";
+  document.getElementById("s_kwp_role").value = s.kwp_role || "Junior Worker";
   document.getElementById("s_shift_team").value = s.shift_team || "";
   document.getElementById("s_status").value = s.status;
   document.getElementById("s_employment_date").value = s.employment_date || "";

@@ -3,6 +3,17 @@
 // to know who is logged in (index.html and, later, modules).
 // Requires the Supabase JS library to be loaded first:
 //   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+//
+// PHASE 2 (KWP) ADDITIONS — both are no-ops for every existing,
+// non-KWP account:
+//   1. must_change_password gate: if the signed-in profile has
+//      must_change_password = true (set when a KWP manager issues a
+//      temporary password), requireAuth() redirects to
+//      force-change-password.html instead of the caller's page.
+//   2. Inactive KWP staff block: if the signed-in profile is linked to
+//      a kwp_staff row (kwp_staff.profile_id) whose status is not
+//      'Active', the session is signed out and the caller is sent back
+//      to login.html. Accounts with no kwp_staff link are unaffected.
 // ============================================================
 
 const SUPABASE_URL = "https://betfhunzmhtdzgvufmfk.supabase.co";
@@ -10,7 +21,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_AfDp1FlHghu9TOfqEUj20Q_Pke7GlTp";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Redirects to login.html if not signed in. Otherwise resolves with the
+// Derives the force-change-password page path from whatever loginPath
+// the caller passed in (e.g. "login.html" -> "force-change-password.html",
+// "../../login.html" -> "../../force-change-password.html"), so no
+// calling page needs to be edited individually.
+function _kwpForceChangePath(loginPath){
+  return loginPath.replace(/login\.html$/, "force-change-password.html");
+}
+
+// Redirects to loginPath.html if not signed in. Otherwise resolves with the
 // full profile: { id, username, role, super_admin_type, section_id,
 // section_name, department_ids, department_names }
 // Throws a descriptive Error on any failure — callers should wrap this in
@@ -34,12 +53,39 @@ async function requireAuth(loginPath) {
 
   const { data: profile, error: profErr } = await sb
     .from("profiles")
-    .select("id, username, role, super_admin_type, section_id, can_self_manage_todos")
+    .select("id, username, role, super_admin_type, section_id, can_self_manage_todos, must_change_password")
     .eq("id", session.user.id)
     .single();
 
   if (profErr || !profile) {
     throw new Error("Could not load profile: " + (profErr ? profErr.message : "no profile row for this account"));
+  }
+
+  // --- KWP Phase 2: forced password change ---
+  if (profile.must_change_password) {
+    window.location.href = _kwpForceChangePath(loginPath);
+    return null;
+  }
+
+  // --- KWP Phase 2: inactive/suspended KWP staff cannot use the system ---
+  // No-op for every account that isn't linked to an employees row with a
+  // kwp_staff assignment. kwp_staff_current always reflects `employees`
+  // live (per the KWP Employee Master Rule) rather than a stored copy.
+  try {
+    const { data: kwpLink } = await sb
+      .from("kwp_staff_current")
+      .select("status")
+      .eq("linked_profile_id", profile.id)
+      .maybeSingle();
+    if (kwpLink && kwpLink.status !== "Active") {
+      await sb.auth.signOut();
+      window.location.href = loginPath + "?blocked=inactive";
+      return null;
+    }
+  } catch (e) {
+    // Non-fatal: if this lookup fails for some reason, fall through
+    // rather than lock every user (KWP or not) out of the whole app.
+    console.warn("KWP status check failed (non-fatal):", e);
   }
 
   let sectionIds = [];

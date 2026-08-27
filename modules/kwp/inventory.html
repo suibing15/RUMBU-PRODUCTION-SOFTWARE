@@ -76,8 +76,9 @@
 <!-- ============ RECEIPTS TAB ============ -->
 <div class="tab-content" id="tab-receipts">
   <div class="card-panel" id="recFormPanel" style="display:none;">
-    <h3>Log Material Receipt</h3>
-    <p class="sub">Matches the paper weight-verification register: vendor's claimed weight, what was recorded on arrival, and the final settled weight once verified. "Received" on the Inventory Ledger uses the settled weight once it's entered — until then it provisionally uses the vendor's claimed weight.</p>
+    <h3 id="recFormTitle">Log Material Receipt</h3>
+    <p class="sub">Matches the paper weight-verification register: vendor's claimed weight, what was recorded on arrival, and the final settled weight once verified. It's normal for a receipt to start with only the claimed weight known — save it, then come back and <b>Edit</b> it once the recorded/settled figures are confirmed, rather than logging it again as a new row.</p>
+    <input type="hidden" id="r_id">
     <div class="form-row-3">
       <div class="field"><label>Date</label><input type="date" id="r_date"></div>
       <div class="field"><label>Vendor Name</label><input id="r_vendor"></div>
@@ -114,8 +115,8 @@
   </div>
   <div class="table-wrap"><div class="table-scroll">
     <table>
-      <thead><tr><th>Date</th><th>Vendor</th><th>Location</th><th>Quality %</th><th>Claimed (kg)</th><th>Recorded (kg)</th><th>Settled (kg)</th><th>Payment %</th><th>Comment</th></tr></thead>
-      <tbody id="recTableBody"><tr><td colspan="9">Loading…</td></tr></tbody>
+      <thead><tr><th>Date</th><th>Vendor</th><th>Location</th><th>Quality %</th><th>Claimed (kg)</th><th>Recorded (kg)</th><th>Settled (kg)</th><th>Payment %</th><th>Comment</th><th></th></tr></thead>
+      <tbody id="recTableBody"><tr><td colspan="10">Loading…</td></tr></tbody>
     </table>
   </div></div>
 </div>
@@ -249,11 +250,44 @@ async function loadLedger(){
 window.loadLedger = loadLedger;
 
 // ---------------- RECEIPTS ----------------
+let RECEIPTS = [];
+
 function openReceiptForm(){
+  document.getElementById("recFormTitle").textContent = "Log Material Receipt";
+  ["r_id","r_lot","r_vendor","r_location","r_kg","r_grade","r_remark_material","r_recorded_kg",
+   "r_ground_kg","r_final_kg","r_payment_pct","r_comment","r_rate","r_remarks"]
+    .forEach(id => document.getElementById(id).value = "");
+  document.getElementById("r_slip").checked = false;
+  document.getElementById("r_date").value = new Date().toISOString().slice(0,10);
   document.getElementById("recFormPanel").style.display = "block";
   document.getElementById("recFormStatus").textContent = "";
 }
 window.openReceiptForm = openReceiptForm;
+
+function editReceipt(id){
+  const r = RECEIPTS.find(x=>x.id === id);
+  if(!r) return;
+  document.getElementById("recFormTitle").textContent = "Edit Material Receipt — " + (r.vendor||"");
+  document.getElementById("r_id").value = r.id;
+  document.getElementById("r_date").value = r.received_date;
+  document.getElementById("r_lot").value = r.lot_no || "";
+  document.getElementById("r_vendor").value = r.vendor || "";
+  document.getElementById("r_location").value = r.vendor_location || "";
+  document.getElementById("r_kg").value = r.kg;
+  document.getElementById("r_grade").value = r.material_quality_percent ?? "";
+  document.getElementById("r_remark_material").value = r.material_remark || "";
+  document.getElementById("r_recorded_kg").value = r.weight_recorded_kg ?? "";
+  document.getElementById("r_ground_kg").value = r.material_available_ground_kg ?? "";
+  document.getElementById("r_final_kg").value = r.final_settled_kg ?? "";
+  document.getElementById("r_payment_pct").value = r.payment_allowed_percent ?? "";
+  document.getElementById("r_comment").value = r.comment || "";
+  document.getElementById("r_rate").value = r.rate_per_kg ?? "";
+  document.getElementById("r_slip").checked = !!r.weight_slip;
+  document.getElementById("r_remarks").value = r.remarks || "";
+  document.getElementById("recFormPanel").style.display = "block";
+  document.getElementById("recFormStatus").textContent = "";
+}
+window.editReceipt = editReceipt;
 
 async function loadReceipts(){
   const from = document.getElementById("rec_from").value, to = document.getElementById("rec_to").value;
@@ -261,21 +295,24 @@ async function loadReceipts(){
   if(!from||!to) return;
   const { data, error } = await sb.from("kwp_material_receipts").select("*")
     .gte("received_date", from).lte("received_date", to).order("received_date", { ascending:false });
-  if(error){ body.innerHTML = "<tr><td colspan='9'>Error: " + error.message + "</td></tr>"; return; }
-  if(!data || !data.length){ body.innerHTML = "<tr><td colspan='9'>No receipts in this range.</td></tr>"; return; }
-  body.innerHTML = data.map(r => `<tr>
+  if(error){ body.innerHTML = "<tr><td colspan='10'>Error: " + error.message + "</td></tr>"; return; }
+  RECEIPTS = data || [];
+  if(!RECEIPTS.length){ body.innerHTML = "<tr><td colspan='10'>No receipts in this range.</td></tr>"; return; }
+  body.innerHTML = RECEIPTS.map(r => `<tr>
     <td>${r.received_date}</td><td>${r.vendor||"—"}</td><td>${r.vendor_location||"—"}</td>
     <td>${r.material_quality_percent!=null?r.material_quality_percent+"%":"—"}</td>
     <td>${n(r.kg)}</td><td>${r.weight_recorded_kg!=null?n(r.weight_recorded_kg):"—"}</td>
     <td>${r.final_settled_kg!=null?"<b>"+n(r.final_settled_kg)+"</b>":"<i>pending</i>"}</td>
     <td>${r.payment_allowed_percent!=null?r.payment_allowed_percent+"%":"—"}</td>
     <td>${r.comment||"—"}</td>
+    <td>${CAN_ENTER?`<button class="btn-sm btn-ghost" onclick="editReceipt(${r.id})">${r.final_settled_kg==null?"Complete":"Edit"}</button>`:""}</td>
   </tr>`).join("");
 }
 window.loadReceipts = loadReceipts;
 
 async function saveReceipt(){
   const status = document.getElementById("recFormStatus");
+  const id = document.getElementById("r_id").value;
   const payload = {
     received_date: document.getElementById("r_date").value,
     lot_no: document.getElementById("r_lot").value.trim() || null,
@@ -291,15 +328,22 @@ async function saveReceipt(){
     comment: document.getElementById("r_comment").value.trim() || null,
     rate_per_kg: document.getElementById("r_rate").value || null,
     weight_slip: document.getElementById("r_slip").checked,
-    remarks: document.getElementById("r_remarks").value.trim() || null,
-    received_by: ME.id
+    remarks: document.getElementById("r_remarks").value.trim() || null
   };
   if(!payload.received_date || isNaN(payload.kg)){ status.className="status err"; status.textContent="Date and vendor's claimed Weight are required."; return; }
   status.className = "status"; status.textContent = "Saving...";
   try{
-    const { error } = await sb.from("kwp_material_receipts").insert(payload);
-    if(error) throw error;
-    await sb.from("kwp_audit_log").insert({ actor_profile_id: ME.id, action:"material_receipt_logged", entity_type:"kwp_material_receipts", new_value: payload });
+    if(id){
+      payload.updated_by = ME.id;
+      const { error } = await sb.from("kwp_material_receipts").update(payload).eq("id", Number(id));
+      if(error) throw error;
+      await sb.from("kwp_audit_log").insert({ actor_profile_id: ME.id, action:"material_receipt_completed", entity_type:"kwp_material_receipts", entity_id:id, new_value: payload });
+    } else {
+      payload.received_by = ME.id;
+      const { error } = await sb.from("kwp_material_receipts").insert(payload);
+      if(error) throw error;
+      await sb.from("kwp_audit_log").insert({ actor_profile_id: ME.id, action:"material_receipt_logged", entity_type:"kwp_material_receipts", new_value: payload });
+    }
     status.className = "status ok"; status.textContent = "✅ Saved.";
     await Promise.all([loadReceipts(), loadLedger()]);
     setTimeout(()=>{ document.getElementById("recFormPanel").style.display="none"; }, 500);

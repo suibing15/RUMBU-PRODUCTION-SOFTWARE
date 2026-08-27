@@ -139,7 +139,7 @@ async function init(){
     const { data: m } = await sb.from("kwp_machines").select("*").eq("status","Active").order("code");
     MACHINES = m || [];
     document.getElementById("f_machine").innerHTML += MACHINES.map(x=>`<option value="${x.id}">${x.code}</option>`).join("");
-    const categories = ["Power / Utilities","Feedstock / Material","Mechanical","Electrical","Blade / Cutting","Crusher","Washing line","Maintenance","Quality","Cleaning","Operator / Manpower","Other"];
+    const categories = ["Blades & Mechanical","Feedstock","Power & Utilities","Other"];
     document.getElementById("f_dtcat").innerHTML += categories.map(c=>`<option>${c}</option>`).join("");
 
     setRange("week", document.querySelector('[data-range="week"]'));

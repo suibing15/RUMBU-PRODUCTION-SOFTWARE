@@ -306,8 +306,7 @@
         onclick: `openModule(null,'${p.dept}','${p.mod}','${p.name.replace(/'/g,"\\'")}','${p.query||""}')`
       }));
     } else {
-      const allowed = BRANCH_PATHS[CURRENT_BRANCH] || new Set();
-      const pages = (MODULE_PAGES_BY_MODULE[CURRENT_PICKER.name] || []).filter(p => allowed.has(p.module_path));
+      const pages = (MODULE_PAGES_BY_MODULE[CURRENT_PICKER.name] || []).filter(p => MY_ALLOWED_PATHS.has(p.module_path));
       items = pages.map(p=>{
         const parts = p.module_path.split("/");
         return { label: p.name, onclick: `openModule(null,'${parts[0]}','${parts[1]}','${p.name.replace(/'/g,"\\'")}')` };
@@ -360,8 +359,7 @@
         label: p.name, dept: p.dept, mod: p.mod, query: p.query || ""
       }));
     } else if(CURRENT_PICKER){
-      const allowed = BRANCH_PATHS[CURRENT_BRANCH] || new Set();
-      const pages = (MODULE_PAGES_BY_MODULE[CURRENT_PICKER.name] || []).filter(p => allowed.has(p.module_path));
+      const pages = (MODULE_PAGES_BY_MODULE[CURRENT_PICKER.name] || []).filter(p => MY_ALLOWED_PATHS.has(p.module_path));
       items = pages.map(p=>{ const parts = p.module_path.split("/"); return { label: p.name, dept: parts[0], mod: parts[1], query: "" }; });
     }
     if(items.length <= 1){ bar.innerHTML = ""; bar.style.display = "none"; return; }
@@ -463,19 +461,23 @@
   }
 
   // ============================================================
-  // BRANCH-AWARE ACCESS MODEL
-  //   - We compute which pages the person may use (assigned_pages;
-  //     Super Admin = all).
-  //   - We map each page to the Branch(es) it belongs to (page_sections),
-  //     limited to the person's own Branch(es).
-  //   - The sidebar then shows only the SELECTED Branch's modules
-  //     (+ compulsory Task Management), and the dashboard landing lists
-  //     that Branch's dashboards.
+  // ACCESS MODEL
+  //   Sidebar modules are PERSON-BASED: whatever pages are ticked for
+  //   someone in Manage Role (assigned_pages) is what they get, and it
+  //   follows their account everywhere — the Branch dropdown no longer
+  //   hides or shows sidebar modules. See MY_ALLOWED_PATHS below.
+  //
+  //   Dashboards stay BRANCH-BASED on purpose: a dashboard's whole job
+  //   is "show me this Branch's numbers", so switching the Branch
+  //   dropdown still changes which dashboard is offered. That mapping
+  //   (page_sections, intersected with assigned_pages) lives in
+  //   BRANCH_PATHS, used only by dashboardsForBranch() now.
   // ============================================================
-  let BRANCH_PATHS = {};     // { branchName: Set(module_path) } — allowed & in that branch
-  let MY_BRANCHES = [];      // [{id, name}] the person's branches
+  let BRANCH_PATHS = {};        // { branchName: Set(module_path) } — DASHBOARDS ONLY, see dashboardsForBranch()
+  let MY_ALLOWED_PATHS = new Set(); // every module_path this person may use, branch-independent — drives the sidebar
+  let MY_BRANCHES = [];      // [{id, name}] the person's branches (still used for the Dashboard Branch dropdown)
   let ALL_DASHBOARDS = [];   // [{module_path, display_name, department}]
-  let CURRENT_BRANCH = null; // selected branch name
+  let CURRENT_BRANCH = null; // selected branch name (Dashboard landing only now)
   const TASK_PATHS_ADMIN = ["todo/assign-task","todo/view-tasks","todo/todo-settings"];
 
   async function buildAccessMap(){
@@ -536,58 +538,56 @@
       });
     }
 
-    // 4) Task Management is compulsory in every branch.
-    Object.keys(BRANCH_PATHS).forEach(bn=>{
-      if(ME.role === "user"){ BRANCH_PATHS[bn].add("todo/my-tasks"); }
-      else { TASK_PATHS_ADMIN.forEach(p=>BRANCH_PATHS[bn].add(p)); }
-    });
+    // 4) Person-level allowed set — this is what the sidebar now runs on.
+    // Super Admin: every registered module_path, unless they've
+    // customized their own sidebar (same rule as before, just no longer
+    // duplicated per branch).
+    if(ME.role === "super_admin"){
+      const allPaths = Object.values(MODULE_PAGES_BY_MODULE).flat().map(p => p.module_path);
+      MY_ALLOWED_PATHS = (allowedPaths && allowedPaths.size)
+        ? new Set(allPaths.filter(p => allowedPaths.has(p)))
+        : new Set(allPaths);
+    } else {
+      MY_ALLOWED_PATHS = new Set(allowedPaths || []);
+    }
+
+    // Task Management is compulsory for everyone, on every branch tab.
+    if(ME.role === "user"){ MY_ALLOWED_PATHS.add("todo/my-tasks"); }
+    else { TASK_PATHS_ADMIN.forEach(p=>MY_ALLOWED_PATHS.add(p)); }
 
     // 4b) Overtime auto-detect: Fill Overtime and Step-N Approval screens
     // are useless to anyone who isn't specifically assigned an overtime
-    // role there — there's no scenario where seeing them without an
-    // actual assignment helps. So these become visible automatically
-    // based on the overtime_step2_fillers / overtime_step_approvers
-    // tables, independent of whatever Branch Modules / Manage Role has
-    // (or hasn't) been ticked. "Initiate Overtime" and "Approver Setup"
-    // are NOT auto-detected — those stay on the normal cascade, same as
-    // every Gatepass screen, since anyone with branch access might
-    // legitimately use them.
+    // role — there's no scenario where seeing them without an actual
+    // assignment helps. So these become visible automatically based on
+    // the overtime_step2_fillers / overtime_initiators /
+    // overtime_step_approvers tables, independent of whatever Manage
+    // Role has (or hasn't) ticked. Now person-level like everything
+    // else here, so it no longer matters which Branch tab is open, or
+    // whether the person's own Branches even include the section named
+    // in their overtime scope row. "Initiate Overtime" and "Approver
+    // Setup" are NOT auto-detected — those stay on the normal ticked
+    // cascade, same as every Gatepass screen, since anyone with page
+    // access might legitimately use them.
     if(ME.role !== "super_admin"){
       try{
         const { data: emp } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
         if(emp){
-          const ensureBranch = (name)=>{
-            if(!BRANCH_PATHS[name]){
-              BRANCH_PATHS[name] = new Set();
-              if(!MY_BRANCHES.some(b=>b.name===name)) MY_BRANCHES.push({ id: 0, name });
-            }
-          };
-
           const { data: fillerScopes } = await sb.from("overtime_step2_fillers").select("section").eq("employee_id", emp.id);
-          (fillerScopes||[]).forEach(s=>{ ensureBranch(s.section); BRANCH_PATHS[s.section].add("overtime/fill-overtime"); });
+          if((fillerScopes||[]).length) MY_ALLOWED_PATHS.add("overtime/fill-overtime");
 
           const { data: initScopes } = await sb.from("overtime_initiators").select("section").eq("employee_id", emp.id);
-          (initScopes||[]).forEach(s=>{
-            ensureBranch(s.section);
-            BRANCH_PATHS[s.section].add("overtime/add-overtime");
+          if((initScopes||[]).length){
+            MY_ALLOWED_PATHS.add("overtime/add-overtime");
             // Anyone who can initiate will eventually need to review their
             // own Step 4 submissions — no separate assignment needed for this.
-            BRANCH_PATHS[s.section].add("overtime/overtime-step4-review");
-          });
+            MY_ALLOWED_PATHS.add("overtime/overtime-step4-review");
+          }
 
           const { data: approverScopes } = await sb.from("overtime_step_approvers").select("section, step").eq("employee_id", emp.id);
           (approverScopes||[]).forEach(s=>{
-            let path = null;
-            if(s.step === 3) path = "overtime/overtime-step3-approval";
-            if(s.step === 5) path = "overtime/overtime-step5-disbursement";
-            if(s.step === 6) path = "overtime/overtime-step6-ed1";
-            if(!path) return;
-            if(s.section === "ALL_BRANCHES"){
-              Object.keys(BRANCH_PATHS).forEach(bn => BRANCH_PATHS[bn].add(path));
-            } else {
-              ensureBranch(s.section);
-              BRANCH_PATHS[s.section].add(path);
-            }
+            if(s.step === 3) MY_ALLOWED_PATHS.add("overtime/overtime-step3-approval");
+            if(s.step === 5) MY_ALLOWED_PATHS.add("overtime/overtime-step5-disbursement");
+            if(s.step === 6) MY_ALLOWED_PATHS.add("overtime/overtime-step6-ed1");
           });
         }
       }catch(e){ console.warn("Overtime auto-detect failed (non-fatal):", e); }
@@ -600,15 +600,18 @@
     }catch(e){ ALL_DASHBOARDS = []; }
   }
 
-  // Filter the sidebar to the selected branch's modules.
+  // Sidebar module visibility is person-based now (MY_ALLOWED_PATHS) —
+  // the branchName argument is kept only so this can still be called from
+  // onDashBranchChange() to track CURRENT_BRANCH for the Dashboard picker
+  // and to refresh an open flyout; it no longer changes which sidebar
+  // modules are shown.
   function applySidebarForBranch(branchName){
     CURRENT_BRANCH = branchName;
-    const allowed = BRANCH_PATHS[branchName] || new Set();
     document.querySelectorAll("[data-group-name]").forEach(btn=>{
       const groupName = btn.getAttribute("data-group-name");
       if(groupName === "Manage Accounts"){ btn.style.display = ""; return; } // role-gated per page inside its own picker, not hidden as a group
       const pages = MODULE_PAGES_BY_MODULE[groupName] || [];
-      const anyAllowed = pages.some(p => allowed.has(p.module_path));
+      const anyAllowed = pages.some(p => MY_ALLOWED_PATHS.has(p.module_path));
       btn.style.display = anyAllowed ? "" : "none";
     });
     // If a module's flyout is open right now, refresh its contents for
@@ -641,7 +644,7 @@
 
   window.onDashBranchChange = function(){
     const branchName = document.getElementById("dashBranch").value;
-    applySidebarForBranch(branchName);            // branch-driven sidebar
+    applySidebarForBranch(branchName);            // tracks CURRENT_BRANCH + refreshes an open flyout; sidebar contents are person-based, not branch-based
     const dashes = dashboardsForBranch(branchName);
     const pick = document.getElementById("dashPick");
     pick.innerHTML = dashes.map(d=>`<option value="${d.module_path}">${d.display_name}</option>`).join("");

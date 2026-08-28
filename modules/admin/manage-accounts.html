@@ -252,6 +252,28 @@
   </div>
 </div>
 
+<div class="hidden" id="adminEmployeeDirectory">
+  <h3>Employee Directory</h3>
+  <p class="sub">Employees in your Branch(es) only. Search, then Grant Access to create their User account below — prefilled from their name.</p>
+  <div class="form-row">
+    <div class="field"><label>Search</label><input id="admin_emp_search" placeholder="Search by name, ID, or department" oninput="renderAdminEmployeeDirectory()"></div>
+    <div class="field"><label>Branch</label>
+      <select id="admin_emp_branch_filter" onchange="renderAdminEmployeeDirectory()">
+        <option value="all">All my Branches</option>
+      </select>
+    </div>
+    <div class="field"><label>Status</label>
+      <select id="admin_emp_status_filter" onchange="renderAdminEmployeeDirectory()">
+        <option value="all">All</option>
+        <option value="no_access">No System Access</option>
+        <option value="has_access">Has System Access</option>
+      </select>
+    </div>
+  </div>
+  <div id="adminEmployeeDirectoryWrap"></div>
+  <div class="status" id="admin_emp_dir_status"></div>
+</div>
+
 <div class="hidden" id="createUserCard">
   <h3>Create User Account</h3>
   <p class="sub">Sections and pages are assigned afterward in Manage Role — a new User starts with no dashboard access until you set that up.</p>
@@ -402,9 +424,11 @@ async function init(){
       // super admin: all panels available
     } else if(ME.role === "admin"){
       document.getElementById("createUserCard").classList.remove("hidden");
+      document.getElementById("adminEmployeeDirectory").classList.remove("hidden");
       document.getElementById("listTitle").textContent = "Manage Role";
       document.getElementById("roleDropdownLabel").textContent = "Select a User you created";
       await loadRoleDropdown();
+      await loadEmployeeDirectory(); // shared loader; renderAdminEmployeeDirectory() scopes it to ME.sectionNames
       // admin: no Settings panel
       document.getElementById("sec-settings").classList.add("role-unavailable");
     } else {
@@ -1154,6 +1178,7 @@ async function createUser(){
     status.className = "status ok"; status.textContent = "✅ " + res.message;
     document.getElementById("u_username").value = ""; document.getElementById("u_password").value = "";
     await logActivity("user_created", ME.username + " created User account \"" + username + "\"");
+    await linkPendingEmployeeIfAny(res.id);
     await loadRoleDropdown();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
@@ -1161,8 +1186,10 @@ async function createUser(){
 }
 
 // =========================================================
-// EMPLOYEE DIRECTORY (Super Admin only) — browse employees, grant
-// system access to convert one into an account.
+// EMPLOYEE DIRECTORY — browse employees, grant system access to convert
+// one into an account. Super Admin sees everyone (renderEmployeeDirectory,
+// includes salary + Change Role); Admin sees only their own Branch(es)
+// (renderAdminEmployeeDirectory, no salary, Grant Access = User role only).
 // =========================================================
 let EMPLOYEES = [];
 let BRANCH_OPTIONS = [];
@@ -1205,9 +1232,17 @@ async function loadEmployeeDirectory(){
         BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join("") +
         '<option value="__unset__">— Not set —</option>';
     }
+    // Admin's own branch filter — scoped to ONLY the branches this Admin
+    // is assigned to (ME.sectionNames), never every branch in the system.
+    const adminBranchFilter = document.getElementById("admin_emp_branch_filter");
+    if(adminBranchFilter && adminBranchFilter.options.length <= 1 && ME.role === "admin"){
+      adminBranchFilter.innerHTML = '<option value="all">All my Branches</option>' +
+        (ME.sectionNames||[]).map(b=>`<option value="${b}">${b}</option>`).join("");
+    }
 
     if(status) status.textContent = "";
     renderEmployeeDirectory();
+    renderAdminEmployeeDirectory();
   }catch(e){
     if(status) status.textContent = "Could not load employees: " + (e.message||e);
   }
@@ -1275,6 +1310,70 @@ function renderEmployeeDirectory(){
   html += "</table>";
   wrap.innerHTML = rows.length ? html : "<p class='sub'>No employees match.</p>";
 }
+
+// Admin's own Employee Directory — same EMPLOYEES data as above, but
+// scoped to ONLY employees whose branch is one of ME.sectionNames (the
+// Branch(es) this specific Admin is assigned to), no salary column, and
+// Grant Access always creates a "user" role account via the Admin's own
+// createUserCard form — an Admin can never grant Admin or Super Admin
+// from here, matching the privilege boundary enforced everywhere else
+// in this file (see MANAGER_ALLOWED_PAGE_IDS, availableSectionIds).
+function renderAdminEmployeeDirectory(){
+  const wrap = document.getElementById("adminEmployeeDirectoryWrap");
+  if(!wrap || ME.role !== "admin") return;
+
+  const myBranches = new Set(ME.sectionNames||[]);
+  const qEl = document.getElementById("admin_emp_search");
+  const fEl = document.getElementById("admin_emp_status_filter");
+  const bEl = document.getElementById("admin_emp_branch_filter");
+  const q = qEl ? qEl.value.trim().toLowerCase() : "";
+  const statusFilter = fEl ? fEl.value : "all";
+  const branchFilter = bEl ? bEl.value : "all";
+
+  const rows = EMPLOYEES.filter(e=>{
+    if(!e.branch || !myBranches.has(e.branch)) return false; // hard branch fence
+    if(branchFilter !== "all" && e.branch !== branchFilter) return false;
+    if(statusFilter === "no_access" && e.has_system_access) return false;
+    if(statusFilter === "has_access" && !e.has_system_access) return false;
+    if(q){
+      const hay = (e.full_name + " " + e.employee_id + " " + (e.department||"")).toLowerCase();
+      if(hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  let html = "<table><tr><th>ID</th><th>Name</th><th>Branch</th><th>Department</th><th>Unit</th><th>Access</th><th>Action</th></tr>";
+  rows.forEach(e=>{
+    html += "<tr><td>" + e.employee_id + "</td><td>" + e.full_name + "</td>" +
+      "<td>" + (e.branch||"") + "</td>" +
+      "<td>" + (e.department||"") + "</td>" +
+      "<td>" + (e.unit||"") + "</td>";
+    if(e.has_system_access){
+      // Admin can see who already has access but cannot change roles —
+      // that stays a Super Admin action.
+      html += "<td><span class=\"badge\">" + (e.linked_role || "access") + "</span></td><td>\u2014</td>";
+    } else {
+      html += "<td>\u2014</td><td><button style=\"margin:0;padding:6px 10px;\" onclick=\"grantAccessFromEmployeeAsAdmin(" + e.id + ")\">Grant Access</button></td>";
+    }
+    html += "</tr>";
+  });
+  html += "</table>";
+  wrap.innerHTML = rows.length ? html : "<p class='sub'>No employees match in your Branch(es).</p>";
+}
+
+// Prefills the Admin's own Create User form (always role "user" — an
+// Admin has no path to grant Admin or Super Admin). Nothing is created
+// until the Admin reviews and submits createUser() themselves.
+function grantAccessFromEmployeeAsAdmin(empId){
+  const emp = EMPLOYEES.find(e=>e.id === empId);
+  if(!emp) return;
+  PENDING_EMPLOYEE = { id: emp.id, employee_id: emp.employee_id, full_name: emp.full_name };
+  document.getElementById("u_username").value = emp.full_name.trim();
+  const dirStatus = document.getElementById("admin_emp_dir_status");
+  if(dirStatus) dirStatus.textContent = "Creating account for " + emp.full_name + " (" + emp.employee_id + ") \u2014 set a password below and submit.";
+  document.getElementById("u_username").scrollIntoView({behavior:"smooth", block:"center"});
+}
+window.grantAccessFromEmployeeAsAdmin = grantAccessFromEmployeeAsAdmin;
 
 // Updates an employee's Branch directly from the inline dropdown in the
 // directory table. Saves immediately on change — no separate save button.

@@ -638,6 +638,9 @@
       empty.style.display = "block";
       empty.querySelector("h2").textContent = "Welcome to the Rumbu Production Reporting System";
       empty.querySelector("p").textContent = "Open a module from the sidebar to get started.";
+      // Still filter the sidebar itself by MY_ALLOWED_PATHS — skipping the
+      // Dashboard toolbar above must not skip sidebar filtering too.
+      applySidebarForBranch(null);
       return;
     }
     const branchSel = document.getElementById("dashBranch");

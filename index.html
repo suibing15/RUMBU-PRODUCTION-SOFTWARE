@@ -625,7 +625,21 @@
   }
 
   // ---- Dashboard landing ----
+  // Dashboards are Admin/Super Admin only — a plain "user" account never
+  // gets the Branch/Dashboard toolbar or any dashboard content, no matter
+  // what's ticked in assigned_pages or page_sections. This is a role
+  // check, not a page-assignment one, so it can't be worked around by
+  // ticking a dashboard for a User in Manage Role.
   function initDashboardLanding(){
+    if(ME.role === "user"){
+      document.querySelector("#dashLanding .dash-toolbar").style.display = "none";
+      document.getElementById("dashFrame").style.display = "none";
+      const empty = document.getElementById("dashEmpty");
+      empty.style.display = "block";
+      empty.querySelector("h2").textContent = "Welcome to the Rumbu Production Reporting System";
+      empty.querySelector("p").textContent = "Open a module from the sidebar to get started.";
+      return;
+    }
     const branchSel = document.getElementById("dashBranch");
     branchSel.innerHTML = MY_BRANCHES.map(b=>`<option value="${b.name}">${b.name}</option>`).join("");
     if(!MY_BRANCHES.length){
@@ -638,6 +652,7 @@
   }
 
   function dashboardsForBranch(branchName){
+    if(ME.role === "user") return []; // Dashboards are Admin/Super Admin only
     const allowed = BRANCH_PATHS[branchName] || new Set();
     return ALL_DASHBOARDS.filter(d => allowed.has(d.module_path));
   }

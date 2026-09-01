@@ -239,7 +239,7 @@ async function loadFillQueue(sections){
 
 async function loadApprovalQueue(sections){
   const { data } = await sb.from("pet_collections")
-    .select("id,form_number,agent_name,section,status,updated_at,pet_stage2_qc(*)")
+    .select("id,form_number,agent_name,section,status,cycle,updated_at,pet_stage2_qc(*)")
     .eq("status","stage2_approval")
     .in("section", sections.length ? sections : ALL_SECTIONS)
     .order("updated_at",{ascending:false});
@@ -252,14 +252,16 @@ async function loadApprovalQueue(sections){
     return;
   }
 
-  // Check which ones this user has already decided on (current cycle)
+  // Check which ones this user has already decided on, for THIS cycle specifically —
+  // a decision from an earlier cycle (before a reject/correct loop) must not hide the
+  // buttons once the form has been corrected and resubmitted as a new cycle.
   const { data: myDecisions } = await sb.from("pet_approvals")
-    .select("collection_id,decision").eq("approver_profile_id",ME.id).eq("stage","stage2");
-  const decided = new Set((myDecisions||[]).map(d=>d.collection_id));
+    .select("collection_id,decision,cycle").eq("approver_profile_id",ME.id).eq("stage","stage2");
+  const decided = new Set((myDecisions||[]).map(d=>d.collection_id+":"+d.cycle));
 
   document.getElementById("approvalQueue").innerHTML = data.map(c=>{
     const qc = c.pet_stage2_qc?.[0]||c.pet_stage2_qc||{};
-    const hasDec = decided.has(c.id);
+    const hasDec = decided.has(c.id+":"+c.cycle);
     return `<div class="approve-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
         <div>

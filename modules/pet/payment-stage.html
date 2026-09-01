@@ -201,19 +201,21 @@ async function loadP1FillQueue(sections){
 
 async function loadP1ApprovalQueue(sections){
   const { data }=await sb.from("pet_collections")
-    .select("id,form_number,agent_name,section,status,pet_stage3_payment(*)")
+    .select("id,form_number,agent_name,section,status,cycle,pet_stage3_payment(*)")
     .eq("status","stage3p1_approval")
     .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p1ApprovalQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No Phase 1 submissions awaiting approval.</p>`; return; }
 
-  const { data:myDec }=await sb.from("pet_approvals").select("collection_id").eq("approver_profile_id",ME.id).eq("stage","stage3p1");
-  const decided=new Set((myDec||[]).map(d=>d.collection_id));
+  // Scoped to THIS cycle — a decision from before a reject/correct loop must not
+  // hide the buttons once the form has been corrected and resubmitted.
+  const { data:myDec }=await sb.from("pet_approvals").select("collection_id,cycle").eq("approver_profile_id",ME.id).eq("stage","stage3p1");
+  const decided=new Set((myDec||[]).map(d=>d.collection_id+":"+d.cycle));
 
   queue.innerHTML=data.map(c=>{
     const pay=(Array.isArray(c.pet_stage3_payment)?c.pet_stage3_payment[0]:c.pet_stage3_payment)||{};
-    const hasDec=decided.has(c.id);
+    const hasDec=decided.has(c.id+":"+c.cycle);
     return `<div class="approve-card">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
         <div><b>${c.form_number}</b> — ${c.agent_name} (${c.section})
@@ -248,19 +250,21 @@ async function loadP2FillQueue(sections){
 
 async function loadP2ApprovalQueue(sections){
   const { data }=await sb.from("pet_collections")
-    .select("id,form_number,agent_name,section,status,pet_stage3_payment(*)")
+    .select("id,form_number,agent_name,section,status,cycle,pet_stage3_payment(*)")
     .eq("status","stage3p2_approval")
     .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p2ApprovalQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No Phase 2 submissions awaiting approval.</p>`; return; }
 
-  const { data:myDec }=await sb.from("pet_approvals").select("collection_id").eq("approver_profile_id",ME.id).eq("stage","stage3p2");
-  const decided=new Set((myDec||[]).map(d=>d.collection_id));
+  // Scoped to THIS cycle — a decision from before a reject/correct loop must not
+  // hide the buttons once the form has been corrected and resubmitted.
+  const { data:myDec }=await sb.from("pet_approvals").select("collection_id,cycle").eq("approver_profile_id",ME.id).eq("stage","stage3p2");
+  const decided=new Set((myDec||[]).map(d=>d.collection_id+":"+d.cycle));
 
   queue.innerHTML=data.map(c=>{
     const pay=(Array.isArray(c.pet_stage3_payment)?c.pet_stage3_payment[0]:c.pet_stage3_payment)||{};
-    const hasDec=decided.has(c.id);
+    const hasDec=decided.has(c.id+":"+c.cycle);
     return `<div class="approve-card">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
         <div><b>${c.form_number}</b> — ${c.agent_name} (${c.section})

@@ -143,7 +143,7 @@
 </div>
 
 <script>
-let ME=null, CURRENT_P1=null, CURRENT_P2=null;
+let ME=null, CURRENT_P1=null, CURRENT_P2=null, ALL_SECTIONS=[];
 
 const NEXT_STATUS={stage3p1:'stage4_filling', stage3p2:'completed'};
 const REJECT_STATUS={stage3p1:'rejected_to_stage2', stage3p2:'rejected_to_stage4'};
@@ -153,6 +153,9 @@ async function init(){
   try{
     ME=await requireAuth("../../login.html");
     if(!ME) return;
+
+    const { data: secData } = await sb.from("app_sections").select("name").order("name");
+    ALL_SECTIONS = (secData||[]).map(s=>s.name);
 
     const [{ data:f1 },{ data:a1 },{ data:f2 },{ data:a2 }]=await Promise.all([
       sb.from("pet_stage_fillers").select("section").eq("stage","stage3p1").eq("profile_id",ME.id),
@@ -184,7 +187,7 @@ async function loadP1FillQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,agent_code,section,status,updated_at")
     .in("status",["stage3p1_filling","rejected_to_stage3p1"])
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p1FillQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No collections waiting for Phase 1 payment entry.</p>`; return; }
@@ -198,7 +201,7 @@ async function loadP1ApprovalQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,section,status,pet_stage3_payment(*)")
     .eq("status","stage3p1_approval")
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p1ApprovalQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No Phase 1 submissions awaiting approval.</p>`; return; }
@@ -229,7 +232,7 @@ async function loadP2FillQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,section,status,updated_at")
     .in("status",["stage3p2_filling","rejected_to_stage4"])
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p2FillQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No collections ready for Phase 2 payment.</p>`; return; }
@@ -245,7 +248,7 @@ async function loadP2ApprovalQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,section,status,pet_stage3_payment(*)")
     .eq("status","stage3p2_approval")
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("p2ApprovalQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No Phase 2 submissions awaiting approval.</p>`; return; }

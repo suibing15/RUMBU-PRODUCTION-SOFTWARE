@@ -116,7 +116,7 @@
 </div>
 
 <script>
-let ME=null, CURRENT_PROD=null;
+let ME=null, CURRENT_PROD=null, ALL_SECTIONS=[];
 
 const NEXT_STATUS={stage4:'stage3p2_filling'};
 const REJECT_STATUS={stage4:'rejected_to_stage3p1'};
@@ -126,6 +126,9 @@ async function init(){
   try{
     ME=await requireAuth("../../login.html");
     if(!ME) return;
+
+    const { data: secData } = await sb.from("app_sections").select("name").order("name");
+    ALL_SECTIONS = (secData||[]).map(s=>s.name);
 
     const [{ data:fillerRows },{ data:approverRows }]=await Promise.all([
       sb.from("pet_stage_fillers").select("section").eq("stage","stage4").eq("profile_id",ME.id),
@@ -149,7 +152,7 @@ async function loadFillQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,agent_code,section,status,updated_at")
     .in("status",["stage4_filling","rejected_to_stage4"])
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("fillQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No collections ready for production entry.</p>`; return; }
@@ -165,7 +168,7 @@ async function loadApprovalQueue(sections){
   const { data }=await sb.from("pet_collections")
     .select("id,form_number,agent_name,section,status,updated_at,pet_stage4_production(*),pet_stage2_qc(offload_location)")
     .eq("status","stage4_approval")
-    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .in("section",sections.length?sections:ALL_SECTIONS)
     .order("updated_at",{ascending:false});
   const queue=document.getElementById("approvalQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No production submissions awaiting approval.</p>`; return; }

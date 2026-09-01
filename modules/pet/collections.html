@@ -66,8 +66,6 @@
       <div><label>Section</label>
         <select id="fSection">
           <option value="">All</option>
-          <option value="Rumbu">Rumbu</option>
-          <option value="MamaSannu">Mama Sannu</option>
         </select>
       </div>
       <div><label>Agent Code</label><input type="text" id="fAgent" placeholder="AGT-..."></div>
@@ -153,11 +151,19 @@ function statusBadge(s){
   return `<span class="badge" style="background:${bg};color:${tc};">${STATUS_LABELS[s]||s}</span>`;
 }
 
+async function loadBranches(){
+  const { data, error } = await sb.from("app_sections").select("name").order("name");
+  if(error) throw new Error("Could not load branches: "+error.message);
+  const sel = document.getElementById("fSection");
+  sel.innerHTML = `<option value="">All</option>` + (data||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("");
+}
+
 async function init(){
   const cs=document.getElementById("connStatus");
   try{
     ME=await requireAuth("../../login.html");
     if(!ME) return;
+    await loadBranches();
     await loadCollections();
     cs.style.color="var(--ok)"; cs.textContent="Connected.";
   }catch(e){ cs.style.color="var(--bad)"; cs.textContent="Error: "+e.message; }

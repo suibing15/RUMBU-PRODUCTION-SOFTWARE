@@ -48,10 +48,10 @@
       <div class="table-scroll">
         <table id="agentTable">
           <thead><tr>
-            <th>Code</th><th>Name</th><th>Phone</th><th>Category</th>
+            <th>Code</th><th>Name</th><th>Branch</th><th>Phone</th><th>Category</th>
             <th>Bank</th><th>Account No.</th><th>Status</th><th>Actions</th>
           </tr></thead>
-          <tbody id="agentBody"><tr><td colspan="8" style="text-align:center;color:var(--muted);">Loading...</td></tr></tbody>
+          <tbody id="agentBody"><tr><td colspan="9" style="text-align:center;color:var(--muted);">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -77,8 +77,18 @@
     </div>
     <label>Agent Name *</label>
     <input type="text" id="fName" placeholder="Full legal name">
-    <label>Phone Number</label>
-    <input type="tel" id="fPhone" placeholder="+234...">
+    <div class="grid2">
+      <div>
+        <label>Phone Number</label>
+        <input type="tel" id="fPhone" placeholder="+234...">
+      </div>
+      <div>
+        <label>Branch (Section) *</label>
+        <select id="fSection">
+          <option value="">Loading branches...</option>
+        </select>
+      </div>
+    </div>
     <label>Address</label>
     <textarea id="fAddress" rows="2" placeholder="Full address"></textarea>
     <div class="grid3">
@@ -104,13 +114,24 @@
 </div>
 
 <script>
-let ME = null, AGENTS = [], EDITING_ID = null;
+let ME = null, AGENTS = [], BRANCHES = [], EDITING_ID = null;
+
+async function loadBranches(){
+  const { data, error } = await sb.from("app_sections").select("name").order("name");
+  if(error) throw new Error("Could not load branches: "+error.message);
+  BRANCHES = (data||[]).map(s=>s.name);
+  const sel = document.getElementById("fSection");
+  sel.innerHTML = BRANCHES.length
+    ? `<option value="">-- Select --</option>` + BRANCHES.map(b=>`<option value="${b}">${b}</option>`).join("")
+    : `<option value="">No branches configured</option>`;
+}
 
 async function init(){
   const cs = document.getElementById("connStatus");
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
+    await loadBranches();
     await loadAgents();
     cs.style.color="var(--ok)"; cs.textContent="Connected.";
   }catch(e){
@@ -127,10 +148,11 @@ async function loadAgents(){
 
 function renderTable(list){
   const body = document.getElementById("agentBody");
-  if(!list.length){ body.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--muted);">No agents found.</td></tr>`; return; }
+  if(!list.length){ body.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--muted);">No agents found.</td></tr>`; return; }
   body.innerHTML = list.map(a=>`<tr>
     <td><b>${a.agent_code}</b></td>
     <td>${a.agent_name}</td>
+    <td>${a.section||"—"}</td>
     <td>${a.phone||"—"}</td>
     <td>${a.category||"—"}</td>
     <td>${a.bank_name||"—"}</td>
@@ -171,6 +193,7 @@ function openEdit(id){
   document.getElementById("fCode").value = a.agent_code;
   document.getElementById("fName").value = a.agent_name;
   document.getElementById("fPhone").value = a.phone||"";
+  document.getElementById("fSection").value = a.section||"";
   document.getElementById("fCategory").value = a.category||"";
   document.getElementById("fAddress").value = a.address||"";
   document.getElementById("fBankName").value = a.bank_name||"";
@@ -183,6 +206,7 @@ function openEdit(id){
 function clearForm(){
   ["fName","fPhone","fAddress","fBankName","fBankAccNum","fBankAccName"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("fCategory").selectedIndex = 0;
+  document.getElementById("fSection").selectedIndex = 0;
   document.getElementById("modalStatus").textContent = "";
 }
 
@@ -191,12 +215,15 @@ function closeModal(){ document.getElementById("modal").classList.remove("open")
 async function saveAgent(){
   const st = document.getElementById("modalStatus");
   const name = document.getElementById("fName").value.trim();
+  const section = document.getElementById("fSection").value;
   if(!name){ st.style.color="var(--bad)"; st.textContent="Agent name is required."; return; }
+  if(!section){ st.style.color="var(--bad)"; st.textContent="Select a branch."; return; }
 
   const payload = {
     agent_code:         document.getElementById("fCode").value,
     agent_name:         name,
     phone:              document.getElementById("fPhone").value.trim()||null,
+    section:            section,
     category:           document.getElementById("fCategory").value||null,
     address:            document.getElementById("fAddress").value.trim()||null,
     bank_name:          document.getElementById("fBankName").value.trim()||null,

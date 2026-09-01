@@ -58,8 +58,7 @@
       <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Assign persons who will be alerted when a LOT is occupied or freed. Scoped per section (branch).</p>
       <label>Section</label>
       <select id="mgrSection" onchange="loadManagers()">
-        <option value="Rumbu">Rumbu</option>
-        <option value="MamaSannu">Mama Sannu</option>
+        <option value="">Loading branches...</option>
       </select>
       <div style="margin-top:14px;" id="mgrList"></div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
@@ -94,6 +93,10 @@ async function init(){
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
+    const { data: sections, error: secErr } = await sb.from("app_sections").select("name").order("name");
+    if(secErr) throw new Error("Could not load branches: "+secErr.message);
+    document.getElementById("mgrSection").innerHTML = (sections||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("")
+      || `<option value="">No branches configured</option>`;
     const { data: users } = await sb.from("profiles").select("id,username,full_name").order("full_name");
     ALL_USERS = users || [];
     const sel = document.getElementById("mgrUserSel");

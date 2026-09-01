@@ -42,8 +42,7 @@
     <div style="margin-bottom:14px;">
       <label>Section (Branch)</label>
       <select id="sectionSel" onchange="loadAll()" style="max-width:260px;">
-        <option value="Rumbu">Rumbu</option>
-        <option value="MamaSannu">Mama Sannu</option>
+        <option value="">Loading branches...</option>
       </select>
     </div>
 
@@ -78,6 +77,10 @@ async function init(){
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
+    const { data: sections, error: secErr } = await sb.from("app_sections").select("name").order("name");
+    if(secErr) throw new Error("Could not load branches: "+secErr.message);
+    document.getElementById("sectionSel").innerHTML = (sections||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("")
+      || `<option value="">No branches configured</option>`;
     const { data: users } = await sb.from("profiles").select("id,username,full_name").order("full_name");
     ALL_USERS = users||[];
     await loadAll();

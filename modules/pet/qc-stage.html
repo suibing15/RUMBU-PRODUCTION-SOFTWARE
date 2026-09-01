@@ -168,7 +168,7 @@
 </div>
 
 <script>
-let ME=null, MY_SECTIONS=[], IS_FILLER=false, IS_APPROVER=false, CURRENT_COLLECTION=null, FREE_LOTS=[];
+let ME=null, MY_SECTIONS=[], ALL_SECTIONS=[], IS_FILLER=false, IS_APPROVER=false, CURRENT_COLLECTION=null, FREE_LOTS=[];
 const WM = 660;
 
 const NEXT_STATUS   = { stage2:'stage3p1_filling' };
@@ -181,6 +181,8 @@ async function init(){
     if(!ME) return;
 
     const mySections = (ME.sectionNames&&ME.sectionNames.length) ? ME.sectionNames : [];
+    const { data: secData } = await sb.from("app_sections").select("name").order("name");
+    ALL_SECTIONS = (secData||[]).map(s=>s.name);
 
     // Check assignments
     const [{ data: fillerRows }, { data: approverRows }] = await Promise.all([
@@ -212,7 +214,7 @@ async function loadFillQueue(sections){
   const { data } = await sb.from("pet_collections")
     .select("id,form_number,agent_name,agent_code,section,status,updated_at")
     .in("status",["submitted","rejected_to_stage2"])
-    .in("section", sections.length ? sections : ["Rumbu","MamaSannu"])
+    .in("section", sections.length ? sections : ALL_SECTIONS)
     .order("updated_at",{ascending:false});
 
   const el = document.getElementById("fillSection");
@@ -239,7 +241,7 @@ async function loadApprovalQueue(sections){
   const { data } = await sb.from("pet_collections")
     .select("id,form_number,agent_name,section,status,updated_at,pet_stage2_qc(*)")
     .eq("status","stage2_approval")
-    .in("section", sections.length ? sections : ["Rumbu","MamaSannu"])
+    .in("section", sections.length ? sections : ALL_SECTIONS)
     .order("updated_at",{ascending:false});
 
   const el = document.getElementById("approvalSection");

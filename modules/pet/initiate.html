@@ -65,8 +65,7 @@
       <div>
         <label>Section (Branch) *</label>
         <select id="fSection">
-          <option value="Rumbu">Rumbu</option>
-          <option value="MamaSannu">Mama Sannu</option>
+          <option value="">Loading branches...</option>
         </select>
       </div>
     </div>
@@ -131,14 +130,25 @@
 </div>
 
 <script>
-let ME = null, AGENTS = [], EDITING_ID = null;
+let ME = null, AGENTS = [], BRANCHES = [], EDITING_ID = null;
+
+async function loadBranches(){
+  const { data, error } = await sb.from("app_sections").select("name").order("name");
+  if(error) throw new Error("Could not load branches: "+error.message);
+  BRANCHES = (data||[]).map(s=>s.name);
+  const sel = document.getElementById("fSection");
+  sel.innerHTML = BRANCHES.length
+    ? BRANCHES.map(b=>`<option value="${b}">${b}</option>`).join("")
+    : `<option value="">No branches configured</option>`;
+}
 
 async function init(){
   const cs = document.getElementById("connStatus");
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
-    const { data } = await sb.from("pet_agents").select("id,agent_code,agent_name").eq("is_active",true).order("agent_name");
+    await loadBranches();
+    const { data } = await sb.from("pet_agents").select("id,agent_code,agent_name,section").eq("is_active",true).order("agent_name");
     AGENTS = data||[];
     await prepareNewForm();
     await loadCorrectionQueue();
@@ -213,7 +223,7 @@ function searchAgent(q){
   const matches = AGENTS.filter(a=>(a.agent_name+a.agent_code).toLowerCase().includes(q.toLowerCase())).slice(0,8);
   if(!matches.length){ drop.style.display="none"; return; }
   drop.innerHTML = matches.map(a=>`<div class="agent-row" onclick="selectAgent(${a.id})">
-    <b>${a.agent_code}</b> — ${a.agent_name}
+    <b>${a.agent_code}</b> — ${a.agent_name}${a.section?` <span style="color:var(--muted);">(${a.section})</span>`:""}
   </div>`).join("");
   drop.style.display="block";
 }

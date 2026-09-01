@@ -510,8 +510,11 @@ async function decide(collectionId, stage, decision, note){
       });
       if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
     } else {
-      // Check if all approvers have now approved
-      const allApproved = await checkAllApproved(collectionId, stage, c.cycle, c.section);
+      // Check if all approvers have now approved.
+      // A super_admin's own decision is always sufficient on its own — lets you
+      // solo-test the whole pipeline end-to-end before real approvers are assigned.
+      // Non-super_admin approvers are still bound by the normal "all must approve" rule.
+      const allApproved = (ME.role==="super_admin") ? true : await checkAllApproved(collectionId, stage, c.cycle, c.section);
       if(allApproved){
         const newStatus = NEXT_STATUS[stage];
         const { error: updErr } = await sb.from("pet_collections").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id",collectionId);

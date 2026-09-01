@@ -280,13 +280,20 @@ async function submitProd(){
       filled_at:            new Date().toISOString()
     };
 
-    const { data:ex }=await sb.from("pet_stage4_production").select("id").eq("collection_id",CURRENT_PROD.id).single();
-    if(ex) await sb.from("pet_stage4_production").update(payload).eq("collection_id",CURRENT_PROD.id);
-    else    await sb.from("pet_stage4_production").insert(payload);
+    const { data:ex }=await sb.from("pet_stage4_production").select("id").eq("collection_id",CURRENT_PROD.id).maybeSingle();
+    if(ex){
+      const { error: prodErr } = await sb.from("pet_stage4_production").update(payload).eq("collection_id",CURRENT_PROD.id);
+      if(prodErr) throw new Error("Could not save production data: "+prodErr.message);
+    } else {
+      const { error: prodErr } = await sb.from("pet_stage4_production").insert(payload);
+      if(prodErr) throw new Error("Could not save production data: "+prodErr.message);
+    }
 
     const oldStatus=CURRENT_PROD.status;
-    await sb.from("pet_collections").update({ status:"stage4_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_PROD.id);
-    await sb.from("pet_activity_log").insert({ collection_id:CURRENT_PROD.id, action:"stage4_filled", stage:"stage4", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage4_approval" });
+    const { error: stErr } = await sb.from("pet_collections").update({ status:"stage4_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_PROD.id);
+    if(stErr) throw new Error("Production data was saved, but could not advance status: "+stErr.message);
+    const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:CURRENT_PROD.id, action:"stage4_filled", stage:"stage4", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage4_approval" });
+    if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
 
     st.style.color="var(--ok)"; st.textContent="Submitted for approval.";
     setTimeout(()=>{ closeProdForm(); init(); },1200);
@@ -299,24 +306,34 @@ async function decide(collectionId, decision, note){
   const stage="stage4";
   if(decision==="rejected"&&!note){ alert("Rejection reason is required."); return; }
   try{
-    const { data:c }=await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
-    await sb.from("pet_approvals").insert({ collection_id:collectionId, stage, cycle:c.cycle, approver_profile_id:ME.id, approver_username:ME.username, decision, correction_note:note||null, decided_at:new Date().toISOString() });
+    const { data:c, error:cErr }=await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
+    if(cErr) throw new Error("Could not load collection: "+cErr.message);
+    const { error: apprErr } = await sb.from("pet_approvals").insert({ collection_id:collectionId, stage, cycle:c.cycle, approver_profile_id:ME.id, approver_username:ME.username, decision, correction_note:note||null, decided_at:new Date().toISOString() });
+    if(apprErr) throw new Error("Could not record your decision: "+apprErr.message);
 
     if(decision==="rejected"){
       const newStatus=REJECT_STATUS[stage];
-      await sb.from("pet_collections").update({ status:newStatus, cycle:(c.cycle||1)+1, updated_at:new Date().toISOString() }).eq("id",collectionId);
-      await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"rejected", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note });
+      const { error: updErr } = await sb.from("pet_collections").update({ status:newStatus, cycle:(c.cycle||1)+1, updated_at:new Date().toISOString() }).eq("id",collectionId);
+      if(updErr) throw new Error("Could not update status: "+updErr.message);
+      const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"rejected", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note });
+      if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
     } else {
-      const allApproved=await checkAllApproved(collectionId,stage,c.cycle,c.section);
+      const allApproved=(ME.role==="super_admin") ? true : await checkAllApproved(collectionId,stage,c.cycle,c.section);
       if(allApproved){
         const newStatus=NEXT_STATUS[stage];
         // Free the LOT
-        const { data:prod4 }=await sb.from("pet_stage4_production").select("lot_id").eq("collection_id",collectionId).single();
+        const { data:prod4, error:prodSelErr }=await sb.from("pet_stage4_production").select("lot_id").eq("collection_id",collectionId).maybeSingle();
+        if(prodSelErr) throw new Error("Could not read production data to free LOT: "+prodSelErr.message);
         if(prod4?.lot_id){
-          await sb.from("pet_lots").update({ is_occupied:false, current_collection_id:null }).eq("id",prod4.lot_id);
+          const { error: lotErr } = await sb.from("pet_lots").update({ is_occupied:false, current_collection_id:null }).eq("id",prod4.lot_id);
+          if(lotErr) throw new Error("Could not free the LOT: "+lotErr.message);
+        } else {
+          console.warn("No LOT recorded on this collection's production data — LOT was not freed.");
         }
-        await sb.from("pet_collections").update({ status:newStatus, updated_at:new Date().toISOString() }).eq("id",collectionId);
-        await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"approved_all_lot_freed", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note:"LOT freed. Phase 2 payment triggered." });
+        const { error: updErr } = await sb.from("pet_collections").update({ status:newStatus, updated_at:new Date().toISOString() }).eq("id",collectionId);
+        if(updErr) throw new Error("LOT freed, but could not advance status: "+updErr.message);
+        const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"approved_all_lot_freed", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note:"LOT freed. Phase 2 payment triggered." });
+        if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
       }
     }
     await init();

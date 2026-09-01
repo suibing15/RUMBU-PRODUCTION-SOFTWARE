@@ -192,7 +192,9 @@ async function loadP1FillQueue(sections){
   const queue=document.getElementById("p1FillQueue");
   if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No collections waiting for Phase 1 payment entry.</p>`; return; }
   queue.innerHTML=data.map(c=>`<div class="queue-row">
-    <div><b>${c.form_number}</b> <span style="font-size:12px;color:var(--muted);margin-left:8px;">${c.agent_name} — ${c.section}</span></div>
+    <div><b>${c.form_number}</b> <span style="font-size:12px;color:var(--muted);margin-left:8px;">${c.agent_name} — ${c.section}</span>
+    ${c.status==="rejected_to_stage3p1"?`<span style="font-size:11px;color:var(--bad);margin-left:8px;">(Returned for correction)</span>`:""}
+    </div>
     <button onclick="openP1Form(${c.id})">Enter Payment</button>
   </div>`).join("");
 }
@@ -322,13 +324,20 @@ async function submitP1(){
       receiptUrl=urlD.publicUrl;
     }
     const payload={ collection_id:CURRENT_P1.id, odoo_po_number:po, payment_90pct_attachment:receiptUrl, phase1_filled_by_profile_id:ME.id, phase1_filled_at:new Date().toISOString() };
-    const { data:ex }=await sb.from("pet_stage3_payment").select("id").eq("collection_id",CURRENT_P1.id).single();
-    if(ex) await sb.from("pet_stage3_payment").update(payload).eq("collection_id",CURRENT_P1.id);
-    else    await sb.from("pet_stage3_payment").insert(payload);
+    const { data:ex }=await sb.from("pet_stage3_payment").select("id").eq("collection_id",CURRENT_P1.id).maybeSingle();
+    if(ex){
+      const { error: payErr } = await sb.from("pet_stage3_payment").update(payload).eq("collection_id",CURRENT_P1.id);
+      if(payErr) throw new Error("Could not save payment data: "+payErr.message);
+    } else {
+      const { error: payErr } = await sb.from("pet_stage3_payment").insert(payload);
+      if(payErr) throw new Error("Could not save payment data: "+payErr.message);
+    }
 
     const oldStatus=CURRENT_P1.status;
-    await sb.from("pet_collections").update({ status:"stage3p1_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_P1.id);
-    await sb.from("pet_activity_log").insert({ collection_id:CURRENT_P1.id, action:"stage3p1_filled", stage:"stage3p1", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage3p1_approval" });
+    const { error: stErr } = await sb.from("pet_collections").update({ status:"stage3p1_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_P1.id);
+    if(stErr) throw new Error("Payment data was saved, but could not advance status: "+stErr.message);
+    const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:CURRENT_P1.id, action:"stage3p1_filled", stage:"stage3p1", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage3p1_approval" });
+    if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
 
     st.style.color="var(--ok)"; st.textContent="Submitted for approval.";
     setTimeout(()=>{ closeP1Form(); init(); },1200);
@@ -392,11 +401,14 @@ async function submitP2(){
     const deductPct=parseFloat(document.getElementById("p2DeductPct").value)||0;
     const deductAmt=parseFloat(document.getElementById("p2DeductAmt").value)||null;
     const payload={ deduction_pct:deductPct, deduction_amount:deductAmt, payment_10pct_attachment:receiptUrl, phase2_filled_by_profile_id:ME.id, phase2_filled_at:new Date().toISOString() };
-    await sb.from("pet_stage3_payment").update(payload).eq("collection_id",CURRENT_P2.id);
+    const { error: payErr } = await sb.from("pet_stage3_payment").update(payload).eq("collection_id",CURRENT_P2.id);
+    if(payErr) throw new Error("Could not save balance payment data: "+payErr.message);
 
     const oldStatus=CURRENT_P2.status;
-    await sb.from("pet_collections").update({ status:"stage3p2_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_P2.id);
-    await sb.from("pet_activity_log").insert({ collection_id:CURRENT_P2.id, action:"stage3p2_filled", stage:"stage3p2", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage3p2_approval" });
+    const { error: stErr } = await sb.from("pet_collections").update({ status:"stage3p2_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_P2.id);
+    if(stErr) throw new Error("Payment data was saved, but could not advance status: "+stErr.message);
+    const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:CURRENT_P2.id, action:"stage3p2_filled", stage:"stage3p2", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage3p2_approval" });
+    if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
 
     st.style.color="var(--ok)"; st.textContent="Submitted for approval.";
     setTimeout(()=>{ closeP2Form(); init(); },1200);
@@ -408,19 +420,25 @@ function closeP2Form(){ document.getElementById("p2Form").style.display="none"; 
 async function decide(collectionId, stage, decision, note){
   if(decision==="rejected"&&!note){ alert("Rejection reason is required."); return; }
   try{
-    const { data:c }=await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
-    await sb.from("pet_approvals").insert({ collection_id:collectionId, stage, cycle:c.cycle, approver_profile_id:ME.id, approver_username:ME.username, decision, correction_note:note||null, decided_at:new Date().toISOString() });
+    const { data:c, error:cErr }=await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
+    if(cErr) throw new Error("Could not load collection: "+cErr.message);
+    const { error: apprErr } = await sb.from("pet_approvals").insert({ collection_id:collectionId, stage, cycle:c.cycle, approver_profile_id:ME.id, approver_username:ME.username, decision, correction_note:note||null, decided_at:new Date().toISOString() });
+    if(apprErr) throw new Error("Could not record your decision: "+apprErr.message);
 
     if(decision==="rejected"){
       const newStatus=REJECT_STATUS[stage];
-      await sb.from("pet_collections").update({ status:newStatus, cycle:(c.cycle||1)+1, updated_at:new Date().toISOString() }).eq("id",collectionId);
-      await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"rejected", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note });
+      const { error: updErr } = await sb.from("pet_collections").update({ status:newStatus, cycle:(c.cycle||1)+1, updated_at:new Date().toISOString() }).eq("id",collectionId);
+      if(updErr) throw new Error("Could not update status: "+updErr.message);
+      const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"rejected", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note });
+      if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
     } else {
-      const allApproved=await checkAllApproved(collectionId,stage,c.cycle,c.section);
+      const allApproved=(ME.role==="super_admin") ? true : await checkAllApproved(collectionId,stage,c.cycle,c.section);
       if(allApproved){
         const newStatus=stage==="stage3p2"?"completed":NEXT_STATUS[stage];
-        await sb.from("pet_collections").update({ status:newStatus, updated_at:new Date().toISOString() }).eq("id",collectionId);
-        await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"approved_all", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus });
+        const { error: updErr } = await sb.from("pet_collections").update({ status:newStatus, updated_at:new Date().toISOString() }).eq("id",collectionId);
+        if(updErr) throw new Error("Could not advance status: "+updErr.message);
+        const { error: logErr } = await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"approved_all", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus });
+        if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
       }
     }
     await init();

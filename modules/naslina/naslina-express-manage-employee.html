@@ -165,12 +165,16 @@ async function loadStaffList(){
   const { data: assignments } = await sb.from("naslina_workflow_stage_assignees").select("stage_id, employee_ref_id");
   const assignedSet = new Set((assignments||[]).map(a => a.stage_id + ":" + a.employee_ref_id));
 
+  const { data: initiators } = await sb.from("naslina_initiators").select("employee_ref_id");
+  const initiatorSet = new Set((initiators||[]).map(i => i.employee_ref_id));
+
   wrap.innerHTML = "";
-  staff.forEach(s => wrap.appendChild(renderStaffCard(s, assignedSet)));
+  staff.forEach(s => wrap.appendChild(renderStaffCard(s, assignedSet, initiatorSet)));
 }
 
-function renderStaffCard(s, assignedSet){
+function renderStaffCard(s, assignedSet, initiatorSet){
   const emp = s.employees;
+  const isInitiator = initiatorSet.has(s.employee_ref_id);
   const el = document.createElement("div");
   el.className = "staff-card";
   el.innerHTML = `
@@ -192,6 +196,12 @@ function renderStaffCard(s, assignedSet){
     </div>
     ${CAN_MANAGE ? `<button class="btn-sm" onclick="saveStaff(${s.id})">Save</button>` : ""}
 
+    <label class="stage-check" style="margin-top:12px;background:rgba(200,163,78,.12);border-color:var(--accent);">
+      <input type="checkbox" ${isInitiator?"checked":""} ${CAN_MANAGE?"":"disabled"}
+        onchange="toggleInitiator(${s.employee_ref_id}, this.checked)">
+      Can Initiate Requests (Start)
+    </label>
+
     <div class="stage-grid">
       ${STAGES.map(stage => {
         const checked = assignedSet.has(stage.id + ":" + s.employee_ref_id);
@@ -205,6 +215,22 @@ function renderStaffCard(s, assignedSet){
   `;
   return el;
 }
+
+async function toggleInitiator(employeeRefId, checked){
+  try{
+    if(checked){
+      const { error } = await sb.from("naslina_initiators").insert({ employee_ref_id: employeeRefId, added_by: MY_EMPLOYEE_ID });
+      if(error) throw error;
+    } else {
+      const { error } = await sb.from("naslina_initiators").delete().eq("employee_ref_id", employeeRefId);
+      if(error) throw error;
+    }
+  }catch(e){
+    alert("❌ Could not update initiator status: " + (e.message || e));
+    await loadStaffList();
+  }
+}
+window.toggleInitiator = toggleInitiator;
 
 async function saveStaff(staffId){
   try{

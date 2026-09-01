@@ -186,7 +186,6 @@ function renderStaffCard(s, assignedSet, initiatorSet){
       <span class="status-pill ${s.status}">${s.status}</span>
     </div>
     <div class="form-row" style="margin-top:12px;">
-      <div class="field"><label>Role Label</label><input id="role-${s.id}" value="${(s.naslina_role||"").replace(/"/g,'&quot;')}" ${CAN_MANAGE?"":"disabled"}></div>
       <div class="field"><label>Status</label>
         <select id="status-${s.id}" ${CAN_MANAGE?"":"disabled"}>
           <option ${s.status==="Active"?"selected":""}>Active</option>
@@ -235,7 +234,6 @@ window.toggleInitiator = toggleInitiator;
 async function saveStaff(staffId){
   try{
     const { error } = await sb.from("naslina_staff").update({
-      naslina_role: document.getElementById(`role-${staffId}`).value.trim() || null,
       status: document.getElementById(`status-${staffId}`).value,
       updated_at: new Date().toISOString()
     }).eq("id", staffId);

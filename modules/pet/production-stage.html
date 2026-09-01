@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Stage — PET Collection</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){ try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme")||"navy"); }catch(e){} })();
+  window.addEventListener("message",function(e){ if(e.data&&e.data.rumbuTheme) document.documentElement.setAttribute("data-theme",e.data.rumbuTheme); });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  body{padding:20px;}
+  .wrap{max-width:1000px;margin:0 auto;}
+  label{font-size:12px;font-weight:700;display:block;margin:10px 0 4px;color:var(--muted);}
+  input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;background:var(--card);color:var(--text);}
+  input[readonly]{background:var(--bg);color:var(--muted);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+  .sec-title{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--heading);margin:18px 0 10px;padding-bottom:4px;border-bottom:2px solid var(--line);}
+  .queue-row{padding:10px 14px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;background:var(--card);gap:10px;flex-wrap:wrap;}
+  .approve-card{border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:10px;}
+  .correction-note{background:#fef3c7;border:1px solid #d97706;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px;}
+  .info-box{background:var(--bg);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.8;}
+  .info-box b{color:var(--heading);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button onclick="(window.parent&&window.parent.closeModule)?window.parent.closeModule():(window.location.href='../../index.html')" style="max-width:200px;margin-bottom:12px;background:var(--accent);color:var(--logo-fg);">&larr; Back</button>
+  <div id="connStatus" style="font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);">Loading...</div>
+
+  <!-- Fill queue -->
+  <div id="fillSection" style="display:none;">
+    <div class="card-panel">
+      <div class="panel-title" style="font-weight:700;font-size:14px;color:var(--heading);margin:0 0 10px;">Stage 4 — Production (Fill Queue)</div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Enter production details for collections ready to go into production.</p>
+      <div id="fillQueue"></div>
+    </div>
+
+    <!-- Production form -->
+    <div id="prodForm" style="display:none;">
+      <div class="card-panel">
+        <h3 id="prodFormTitle" style="color:var(--heading);margin:0 0 6px;">Production Data Entry</h3>
+        <div id="prodCorrNote" style="display:none;" class="correction-note"></div>
+
+        <div class="info-box" id="prodSummary"></div>
+
+        <div class="grid3">
+          <div><label>Form Number</label><input type="text" id="pfFormNum" readonly></div>
+          <div><label>Agent Code (AGENT_CODE)</label><input type="text" id="pfAgentCode" readonly></div>
+          <div><label>LOT (OFFLOAD_LOCATION)</label><input type="text" id="pfLot" readonly></div>
+        </div>
+
+        <div class="sec-title">Production Time</div>
+        <div class="grid2">
+          <div>
+            <label>Production Start *</label>
+            <input type="datetime-local" id="pfStart">
+          </div>
+          <div>
+            <label>Production End *</label>
+            <input type="datetime-local" id="pfEnd">
+          </div>
+        </div>
+
+        <div class="sec-title">Waste Data</div>
+        <div class="grid3">
+          <div>
+            <label>Waste — Non-PET Bottles (kg)</label>
+            <input type="number" id="pfWasteNonPet" step="0.01" oninput="computeWaste()">
+          </div>
+          <div>
+            <label>Waste — Oily Bottles (kg)</label>
+            <input type="number" id="pfWasteOily" step="0.01" oninput="computeWaste()">
+          </div>
+          <div>
+            <label>Waste — Aged Bottles (kg)</label>
+            <input type="number" id="pfWasteAged" step="0.01" oninput="computeWaste()">
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:6px;">
+          <div>
+            <label>Total Waste Record (kg) — WASTE_NON_PET + WASTE_OILY + WASTE_AGED</label>
+            <input type="number" id="pfTotalWaste" readonly>
+          </div>
+          <div>
+            <label>Colour Bottles (kg)</label>
+            <input type="number" id="pfColour" step="0.01">
+          </div>
+        </div>
+
+        <div style="margin-top:20px;display:flex;gap:10px;">
+          <button onclick="submitProd()">Submit for Approval</button>
+          <button class="btn-ghost" onclick="closeProdForm()">Cancel</button>
+        </div>
+        <div id="prodFormStatus" style="margin-top:10px;font-size:13px;font-weight:700;min-height:16px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approval queue -->
+  <div id="approvalSection" style="display:none;margin-top:16px;">
+    <div class="card-panel">
+      <div style="font-weight:700;font-size:14px;color:var(--heading);margin:0 0 10px;">Stage 4 — Production (Approval Queue)</div>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Review and approve or reject. Approval frees the LOT and triggers Phase 2 payment.</p>
+      <div id="approvalQueue"></div>
+    </div>
+  </div>
+
+  <div id="noQueue" style="display:none;text-align:center;color:var(--muted);padding:40px;font-size:14px;">
+    No production actions assigned to you at this stage.
+  </div>
+</div>
+
+<script>
+let ME=null, CURRENT_PROD=null;
+
+const NEXT_STATUS={stage4:'stage3p2_filling'};
+const REJECT_STATUS={stage4:'rejected_to_stage3p1'};
+
+async function init(){
+  const cs=document.getElementById("connStatus");
+  try{
+    ME=await requireAuth("../../login.html");
+    if(!ME) return;
+
+    const [{ data:fillerRows },{ data:approverRows }]=await Promise.all([
+      sb.from("pet_stage_fillers").select("section").eq("stage","stage4").eq("profile_id",ME.id),
+      sb.from("pet_stage_approvers").select("section").eq("stage","stage4").eq("profile_id",ME.id)
+    ]);
+    const isFiller   =(fillerRows&&fillerRows.length>0)||ME.role==="super_admin";
+    const isApprover =(approverRows&&approverRows.length>0)||ME.role==="super_admin";
+    const fSecs=(fillerRows||[]).map(r=>r.section);
+    const aSecs=(approverRows||[]).map(r=>r.section);
+
+    let anyQ=false;
+    if(isFiller){   await loadFillQueue(fSecs);   document.getElementById("fillSection").style.display="block"; anyQ=true; }
+    if(isApprover){ await loadApprovalQueue(aSecs); document.getElementById("approvalSection").style.display="block"; anyQ=true; }
+    if(!anyQ) document.getElementById("noQueue").style.display="block";
+
+    cs.style.color="var(--ok)"; cs.textContent="Connected.";
+  }catch(e){ cs.style.color="var(--bad)"; cs.textContent="Error: "+e.message; }
+}
+
+async function loadFillQueue(sections){
+  const { data }=await sb.from("pet_collections")
+    .select("id,form_number,agent_name,agent_code,section,status,updated_at")
+    .in("status",["stage4_filling","rejected_to_stage4"])
+    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .order("updated_at",{ascending:false});
+  const queue=document.getElementById("fillQueue");
+  if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No collections ready for production entry.</p>`; return; }
+  queue.innerHTML=data.map(c=>`<div class="queue-row">
+    <div><b>${c.form_number}</b> <span style="font-size:12px;color:var(--muted);margin-left:8px;">${c.agent_name} (${c.agent_code}) — ${c.section}</span>
+    ${c.status==="rejected_to_stage4"?`<span style="font-size:11px;color:var(--bad);margin-left:8px;">(Returned for correction)</span>`:""}
+    </div>
+    <button onclick="openProdForm(${c.id})">Enter Production Data</button>
+  </div>`).join("");
+}
+
+async function loadApprovalQueue(sections){
+  const { data }=await sb.from("pet_collections")
+    .select("id,form_number,agent_name,section,status,updated_at,pet_stage4_production(*),pet_stage2_qc(offload_location)")
+    .eq("status","stage4_approval")
+    .in("section",sections.length?sections:["Rumbu","MamaSannu"])
+    .order("updated_at",{ascending:false});
+  const queue=document.getElementById("approvalQueue");
+  if(!data||!data.length){ queue.innerHTML=`<p style="font-size:13px;color:var(--muted);">No production submissions awaiting approval.</p>`; return; }
+
+  const { data:myDec }=await sb.from("pet_approvals").select("collection_id").eq("approver_profile_id",ME.id).eq("stage","stage4");
+  const decided=new Set((myDec||[]).map(d=>d.collection_id));
+
+  queue.innerHTML=data.map(c=>{
+    const prod=(Array.isArray(c.pet_stage4_production)?c.pet_stage4_production[0]:c.pet_stage4_production)||{};
+    const qc=(Array.isArray(c.pet_stage2_qc)?c.pet_stage2_qc[0]:c.pet_stage2_qc)||{};
+    const hasDec=decided.has(c.id);
+    return `<div class="approve-card">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div>
+          <b>${c.form_number}</b> — ${c.agent_name} (${c.section})
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+            LOT: ${qc.offload_location||prod.offload_location||"—"} |
+            Total Waste: ${prod.total_waste_kg||0} kg |
+            Colour Bottles: ${prod.colour_bottles_kg||0} kg
+          </div>
+          <div style="font-size:12px;color:var(--muted);">
+            Start: ${prod.production_start?new Date(prod.production_start).toLocaleString("en-GB"):"—"} |
+            End: ${prod.production_end?new Date(prod.production_end).toLocaleString("en-GB"):"—"}
+          </div>
+        </div>
+        ${hasDec?`<span style="color:var(--ok);font-size:12px;font-weight:700;">Decision submitted</span>`:""}
+      </div>
+      ${!hasDec?`<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="decide(${c.id},'approved',null)" style="background:var(--ok);">Approve &amp; Free LOT → Trigger Phase 2</button>
+        <input type="text" id="note4_${c.id}" placeholder="Rejection reason..." style="flex:1;min-width:200px;">
+        <button onclick="decide(${c.id},'rejected',document.getElementById('note4_${c.id}').value)" style="background:var(--bad);">Reject</button>
+      </div>`:""}
+    </div>`;
+  }).join("");
+}
+
+async function openProdForm(id){
+  const { data:c }=await sb.from("pet_collections").select("*,pet_stage2_qc(*),pet_stage4_production(*)").eq("id",id).single();
+  if(!c) return;
+  CURRENT_PROD=c;
+  const qc=(Array.isArray(c.pet_stage2_qc)?c.pet_stage2_qc[0]:c.pet_stage2_qc)||{};
+  const prod=(Array.isArray(c.pet_stage4_production)?c.pet_stage4_production[0]:c.pet_stage4_production)||{};
+
+  document.getElementById("pfFormNum").value=c.form_number;
+  document.getElementById("pfAgentCode").value=c.agent_code;
+  document.getElementById("pfLot").value=qc.offload_location||prod.offload_location||"—";
+
+  document.getElementById("prodSummary").innerHTML=`
+    <b>Agent:</b> ${c.agent_name} (${c.agent_code})<br>
+    <b>LOT:</b> ${qc.offload_location||"—"} — <b>Section:</b> ${c.section}<br>
+    <b>Rumbu Weighbridge Weight:</b> ${c.rumbu_weighbridge_weight||0} kg<br>
+    <b>Unacceptable Waste Value:</b> ${qc.unacceptable_waste_value||0} kg (used for Phase 2 deduction)`;
+
+  if(prod.id){
+    document.getElementById("pfStart").value=prod.production_start?prod.production_start.slice(0,16):"";
+    document.getElementById("pfEnd").value=prod.production_end?prod.production_end.slice(0,16):"";
+    document.getElementById("pfWasteNonPet").value=prod.waste_non_pet_kg||"";
+    document.getElementById("pfWasteOily").value=prod.waste_oily_kg||"";
+    document.getElementById("pfWasteAged").value=prod.waste_aged_kg||"";
+    document.getElementById("pfTotalWaste").value=prod.total_waste_kg||"";
+    document.getElementById("pfColour").value=prod.colour_bottles_kg||"";
+  } else {
+    ["pfStart","pfEnd","pfWasteNonPet","pfWasteOily","pfWasteAged","pfTotalWaste","pfColour"].forEach(id=>{ document.getElementById(id).value=""; });
+  }
+
+  if(c.status==="rejected_to_stage4"){
+    const { data:log }=await sb.from("pet_activity_log").select("note").eq("collection_id",id).eq("action","rejected").order("created_at",{ascending:false}).limit(1);
+    if(log&&log.length){ const el=document.getElementById("prodCorrNote"); el.style.display="block"; el.innerHTML=`<b>Rejection reason:</b> ${log[0].note}`; }
+  } else document.getElementById("prodCorrNote").style.display="none";
+
+  document.getElementById("prodFormTitle").textContent="Production Entry — "+c.form_number;
+  document.getElementById("prodFormStatus").textContent="";
+  document.getElementById("prodForm").style.display="block";
+  document.getElementById("prodForm").scrollIntoView({behavior:"smooth"});
+}
+
+function computeWaste(){
+  const np=parseFloat(document.getElementById("pfWasteNonPet").value)||0;
+  const oi=parseFloat(document.getElementById("pfWasteOily").value)||0;
+  const ag=parseFloat(document.getElementById("pfWasteAged").value)||0;
+  document.getElementById("pfTotalWaste").value=(np+oi+ag).toFixed(2);
+}
+
+async function submitProd(){
+  const st=document.getElementById("prodFormStatus");
+  const start=document.getElementById("pfStart").value;
+  const end=document.getElementById("pfEnd").value;
+  if(!start||!end){ st.style.color="var(--bad)"; st.textContent="Production start and end times are required."; return; }
+
+  st.style.color="var(--muted)"; st.textContent="Saving...";
+  try{
+    const qc=(Array.isArray(CURRENT_PROD.pet_stage2_qc)?CURRENT_PROD.pet_stage2_qc[0]:CURRENT_PROD.pet_stage2_qc)||{};
+    const np=parseFloat(document.getElementById("pfWasteNonPet").value)||0;
+    const oi=parseFloat(document.getElementById("pfWasteOily").value)||0;
+    const ag=parseFloat(document.getElementById("pfWasteAged").value)||0;
+    const payload={
+      collection_id:        CURRENT_PROD.id,
+      agent_code:           CURRENT_PROD.agent_code,
+      lot_id:               qc.lot_id||null,
+      offload_location:     qc.offload_location||null,
+      production_start:     new Date(start).toISOString(),
+      production_end:       new Date(end).toISOString(),
+      waste_non_pet_kg:     np,
+      waste_oily_kg:        oi,
+      waste_aged_kg:        ag,
+      total_waste_kg:       parseFloat((np+oi+ag).toFixed(2)),
+      colour_bottles_kg:    parseFloat(document.getElementById("pfColour").value)||null,
+      filled_by_profile_id: ME.id,
+      filled_at:            new Date().toISOString()
+    };
+
+    const { data:ex }=await sb.from("pet_stage4_production").select("id").eq("collection_id",CURRENT_PROD.id).single();
+    if(ex) await sb.from("pet_stage4_production").update(payload).eq("collection_id",CURRENT_PROD.id);
+    else    await sb.from("pet_stage4_production").insert(payload);
+
+    const oldStatus=CURRENT_PROD.status;
+    await sb.from("pet_collections").update({ status:"stage4_approval", updated_at:new Date().toISOString() }).eq("id",CURRENT_PROD.id);
+    await sb.from("pet_activity_log").insert({ collection_id:CURRENT_PROD.id, action:"stage4_filled", stage:"stage4", actor_profile_id:ME.id, actor_username:ME.username, old_status:oldStatus, new_status:"stage4_approval" });
+
+    st.style.color="var(--ok)"; st.textContent="Submitted for approval.";
+    setTimeout(()=>{ closeProdForm(); init(); },1200);
+  }catch(e){ st.style.color="var(--bad)"; st.textContent="Error: "+e.message; }
+}
+
+function closeProdForm(){ document.getElementById("prodForm").style.display="none"; CURRENT_PROD=null; }
+
+async function decide(collectionId, decision, note){
+  const stage="stage4";
+  if(decision==="rejected"&&!note){ alert("Rejection reason is required."); return; }
+  try{
+    const { data:c }=await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
+    await sb.from("pet_approvals").insert({ collection_id:collectionId, stage, cycle:c.cycle, approver_profile_id:ME.id, approver_username:ME.username, decision, correction_note:note||null, decided_at:new Date().toISOString() });
+
+    if(decision==="rejected"){
+      const newStatus=REJECT_STATUS[stage];
+      await sb.from("pet_collections").update({ status:newStatus, cycle:(c.cycle||1)+1, updated_at:new Date().toISOString() }).eq("id",collectionId);
+      await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"rejected", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note });
+    } else {
+      const allApproved=await checkAllApproved(collectionId,stage,c.cycle,c.section);
+      if(allApproved){
+        const newStatus=NEXT_STATUS[stage];
+        // Free the LOT
+        const { data:prod4 }=await sb.from("pet_stage4_production").select("lot_id").eq("collection_id",collectionId).single();
+        if(prod4?.lot_id){
+          await sb.from("pet_lots").update({ is_occupied:false, current_collection_id:null }).eq("id",prod4.lot_id);
+        }
+        await sb.from("pet_collections").update({ status:newStatus, updated_at:new Date().toISOString() }).eq("id",collectionId);
+        await sb.from("pet_activity_log").insert({ collection_id:collectionId, action:"approved_all_lot_freed", stage, actor_profile_id:ME.id, actor_username:ME.username, old_status:c.status, new_status:newStatus, note:"LOT freed. Phase 2 payment triggered." });
+      }
+    }
+    await init();
+  }catch(e){ alert("Error: "+e.message); }
+}
+
+async function checkAllApproved(collectionId,stage,cycle,section){
+  const [{ data:approvers },{ data:approvals }]=await Promise.all([
+    sb.from("pet_stage_approvers").select("profile_id").eq("section",section).eq("stage",stage),
+    sb.from("pet_approvals").select("approver_profile_id").eq("collection_id",collectionId).eq("stage",stage).eq("cycle",cycle).eq("decision","approved")
+  ]);
+  if(!approvers||!approvers.length) return true;
+  const assigned=new Set(approvers.map(a=>a.profile_id));
+  const approved=new Set((approvals||[]).map(a=>a.approver_profile_id));
+  return [...assigned].every(id=>approved.has(id));
+}
+
+init();
+</script>
+</body>
+</html>

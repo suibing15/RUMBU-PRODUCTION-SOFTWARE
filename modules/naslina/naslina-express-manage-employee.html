@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Naslina Express — Manage Employee</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme") || "navy"); }catch(e){}
+  })();
+  window.addEventListener("message", function(e){
+    if(e.data && e.data.rumbuTheme){ document.documentElement.setAttribute("data-theme", e.data.rumbuTheme); }
+  });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  body{padding:20px;}
+  .wrap{max-width:1100px;margin:0 auto;}
+  #connStatus{font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);}
+  .readonly-banner{background:rgba(154,107,0,.12);color:var(--warn);padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;margin-bottom:14px;}
+
+  .search-row{display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;}
+  .search-row .field{flex:1;margin-bottom:0;}
+  .search-results{border:1px solid var(--line);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;background:var(--card);}
+  .sr-item{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;}
+  .sr-item:last-child{border-bottom:0;}
+  .sr-item .sr-name{font-weight:600;color:var(--heading);}
+  .sr-item .sr-id{color:var(--muted);font-size:11.5px;}
+  .sr-item.already{opacity:.55;}
+
+  .staff-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow);}
+  .sc-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .sc-name{font-weight:700;color:var(--heading);font-size:14px;}
+  .sc-id{color:var(--muted);font-size:11.5px;}
+  .status-pill{border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;color:#fff;}
+  .status-pill.Active{background:var(--ok);}
+  .status-pill.Inactive{background:var(--muted);}
+
+  .stage-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .stage-check{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line-2);border-radius:20px;padding:6px 12px;font-size:12.5px;cursor:pointer;}
+  .stage-check input{margin:0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+<div id="roBanner" class="readonly-banner" style="display:none;">You have read-only access here. Managing Naslina Express staff and stage assignments is limited to Ibrahim Tukur Aliyu and GM.</div>
+
+<div class="card-panel" id="addPanel">
+  <h3>Add Employee to Naslina Express</h3>
+  <p class="sub">Search the shared employee directory — Naslina's own staff and any Agriwatts staff who hold an approval role here.</p>
+  <div class="search-row">
+    <div class="field"><label>Search by name or Employee ID</label><input id="searchInput" oninput="onSearchInput()" placeholder="Start typing..."></div>
+  </div>
+  <div class="search-results" id="searchResults" style="display:none;"></div>
+</div>
+
+<div class="card-panel">
+  <h3>Naslina Express Staff</h3>
+  <p class="sub">Role label is free text (titles here mix Naslina and Agriwatts roles). Tick which workflow stages each person is an assignee on — a stage only advances once every ticked assignee has approved.</p>
+  <div id="staffListWrap"></div>
+</div>
+
+</div>
+
+<script>
+let ME = null;
+let CAN_MANAGE = false;
+let MY_EMPLOYEE_ID = null;
+let STAGES = [];
+let searchTimer = null;
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    const { data: emp, error: empErr } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
+    if(empErr) throw empErr;
+    MY_EMPLOYEE_ID = emp ? emp.id : null;
+
+    // Permission gate: Ibrahim Tukur Aliyu and GM only, for now.
+    // No dedicated role flag exists yet for "GM" — until one does,
+    // this falls back to admin/super_admin so nobody with a lesser
+    // role can edit stage assignments. Tighten once a real GM
+    // identifier is available.
+    CAN_MANAGE = (ME.role === "admin" || ME.role === "super_admin");
+    document.getElementById("roBanner").style.display = CAN_MANAGE ? "none" : "block";
+    document.getElementById("addPanel").style.display = CAN_MANAGE ? "block" : "none";
+
+    const { data: stages, error: stErr } = await sb.from("naslina_workflow_stages")
+      .select("*").eq("requires_action", true).order("sequence_order");
+    if(stErr) throw stErr;
+    STAGES = stages || [];
+
+    status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+    await loadStaffList();
+  }catch(e){
+    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    console.error(e);
+  }
+}
+
+// ---- Search + add ----
+function onSearchInput(){
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 300);
+}
+window.onSearchInput = onSearchInput;
+
+async function runSearch(){
+  const q = document.getElementById("searchInput").value.trim();
+  const box = document.getElementById("searchResults");
+  if(!q){ box.style.display = "none"; box.innerHTML = ""; return; }
+
+  const { data: matches, error } = await sb.from("employees")
+    .select("id, employee_id, full_name")
+    .or(`full_name.ilike.%${q}%,employee_id.ilike.%${q}%`)
+    .limit(15);
+  if(error){ box.innerHTML = `<div class="sr-item">Error: ${error.message}</div>`; box.style.display = "block"; return; }
+  if(!matches || !matches.length){ box.innerHTML = `<div class="sr-item">No matches.</div>`; box.style.display = "block"; return; }
+
+  const { data: existing } = await sb.from("naslina_staff").select("employee_ref_id");
+  const existingIds = new Set((existing||[]).map(s => s.employee_ref_id));
+
+  box.innerHTML = matches.map(m => {
+    const already = existingIds.has(m.id);
+    return `<div class="sr-item ${already ? "already" : ""}">
+      <span><span class="sr-name">${m.full_name}</span> <span class="sr-id">(${m.employee_id || m.id})</span></span>
+      ${already
+        ? `<span class="sr-id">Already added</span>`
+        : `<button class="btn-sm" onclick="addStaff(${m.id})">Add</button>`}
+    </div>`;
+  }).join("");
+  box.style.display = "block";
+}
+
+async function addStaff(employeeId){
+  try{
+    const { error } = await sb.from("naslina_staff").insert({
+      employee_ref_id: employeeId, added_by: MY_EMPLOYEE_ID
+    });
+    if(error) throw error;
+    document.getElementById("searchInput").value = "";
+    document.getElementById("searchResults").style.display = "none";
+    await loadStaffList();
+  }catch(e){
+    alert("❌ Could not add: " + (e.message || e));
+  }
+}
+window.addStaff = addStaff;
+
+// ---- Staff list + role/status editing + stage assignment ----
+async function loadStaffList(){
+  const wrap = document.getElementById("staffListWrap");
+  const { data: staff, error } = await sb.from("naslina_staff")
+    .select("*, employees!naslina_staff_employee_ref_id_fkey(id, employee_id, full_name)")
+    .order("created_at", { ascending: false });
+  if(error){ wrap.innerHTML = "<div class='sub'>Error: " + error.message + "</div>"; return; }
+  if(!staff || !staff.length){ wrap.innerHTML = "<div class='sub'>No one has been added to Naslina Express yet.</div>"; return; }
+
+  const { data: assignments } = await sb.from("naslina_workflow_stage_assignees").select("stage_id, employee_ref_id");
+  const assignedSet = new Set((assignments||[]).map(a => a.stage_id + ":" + a.employee_ref_id));
+
+  const { data: initiators } = await sb.from("naslina_initiators").select("employee_ref_id");
+  const initiatorSet = new Set((initiators||[]).map(i => i.employee_ref_id));
+
+  wrap.innerHTML = "";
+  staff.forEach(s => wrap.appendChild(renderStaffCard(s, assignedSet, initiatorSet)));
+}
+
+function renderStaffCard(s, assignedSet, initiatorSet){
+  const emp = s.employees;
+  const isInitiator = initiatorSet.has(s.employee_ref_id);
+  const el = document.createElement("div");
+  el.className = "staff-card";
+  el.innerHTML = `
+    <div class="sc-head">
+      <div>
+        <div class="sc-name">${emp ? emp.full_name : "—"}</div>
+        <div class="sc-id">${emp ? (emp.employee_id || emp.id) : "—"}</div>
+      </div>
+      <span class="status-pill ${s.status}">${s.status}</span>
+    </div>
+    <div class="form-row" style="margin-top:12px;">
+      <div class="field"><label>Status</label>
+        <select id="status-${s.id}" ${CAN_MANAGE?"":"disabled"}>
+          <option ${s.status==="Active"?"selected":""}>Active</option>
+          <option ${s.status==="Inactive"?"selected":""}>Inactive</option>
+        </select>
+      </div>
+    </div>
+    ${CAN_MANAGE ? `<button class="btn-sm" onclick="saveStaff(${s.id})">Save</button>` : ""}
+
+    <label class="stage-check" style="margin-top:12px;background:rgba(200,163,78,.12);border-color:var(--accent);">
+      <input type="checkbox" ${isInitiator?"checked":""} ${CAN_MANAGE?"":"disabled"}
+        onchange="toggleInitiator(${s.employee_ref_id}, this.checked)">
+      Can Initiate Requests (Start)
+    </label>
+
+    <div class="stage-grid">
+      ${STAGES.map(stage => {
+        const checked = assignedSet.has(stage.id + ":" + s.employee_ref_id);
+        return `<label class="stage-check">
+          <input type="checkbox" ${checked?"checked":""} ${CAN_MANAGE?"":"disabled"}
+            onchange="toggleStageAssignment(${s.employee_ref_id}, '${stage.id}', this.checked)">
+          ${stage.stage_name}
+        </label>`;
+      }).join("")}
+    </div>
+  `;
+  return el;
+}
+
+async function toggleInitiator(employeeRefId, checked){
+  try{
+    if(checked){
+      const { error } = await sb.from("naslina_initiators").insert({ employee_ref_id: employeeRefId, added_by: MY_EMPLOYEE_ID });
+      if(error) throw error;
+    } else {
+      const { error } = await sb.from("naslina_initiators").delete().eq("employee_ref_id", employeeRefId);
+      if(error) throw error;
+    }
+  }catch(e){
+    alert("❌ Could not update initiator status: " + (e.message || e));
+    await loadStaffList();
+  }
+}
+window.toggleInitiator = toggleInitiator;
+
+async function saveStaff(staffId){
+  try{
+    const { error } = await sb.from("naslina_staff").update({
+      status: document.getElementById(`status-${staffId}`).value,
+      updated_at: new Date().toISOString()
+    }).eq("id", staffId);
+    if(error) throw error;
+    await loadStaffList();
+  }catch(e){
+    alert("❌ Could not save: " + (e.message || e));
+  }
+}
+window.saveStaff = saveStaff;
+
+async function toggleStageAssignment(employeeRefId, stageId, checked){
+  try{
+    if(checked){
+      const { error } = await sb.from("naslina_workflow_stage_assignees").insert({
+        stage_id: stageId, employee_ref_id: employeeRefId, added_by: MY_EMPLOYEE_ID
+      });
+      if(error) throw error;
+    } else {
+      const { error } = await sb.from("naslina_workflow_stage_assignees")
+        .delete().eq("stage_id", stageId).eq("employee_ref_id", employeeRefId);
+      if(error) throw error;
+    }
+  }catch(e){
+    alert("❌ Could not update stage assignment: " + (e.message || e));
+    await loadStaffList(); // revert the checkbox to actual state
+  }
+}
+window.toggleStageAssignment = toggleStageAssignment;
+
+init();
+</script>
+</body>
+</html>

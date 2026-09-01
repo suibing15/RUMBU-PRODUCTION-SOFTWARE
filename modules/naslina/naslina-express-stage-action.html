@@ -52,6 +52,8 @@
   <p class="sub">Requests currently at a workflow stage you're assigned to. All assignees on a stage must approve before it advances; a decline sends the request back to the submitter for edits and resubmission.</p>
 </div>
 
+<div id="topStatus" class="status" style="display:none;"></div>
+
 <div id="listWrap"></div>
 
 </div>
@@ -206,7 +208,7 @@ function renderRequestCard(r){
       </div>
     </div>
 
-    <button onclick="submitAction(${r.id}, '${stageKey}')">Submit</button>
+    <button onclick="submitAction(${r.id}, '${stageKey}', '${r.reference_no}')">Submit</button>
     <div class="status" id="status-${r.id}"></div>
   `;
 
@@ -256,7 +258,7 @@ function removeStagedFile(requestId, key, idx){
 }
 window.removeStagedFile = removeStagedFile;
 
-async function submitAction(requestId, stageKey){
+async function submitAction(requestId, stageKey, referenceNo){
   const status = document.getElementById(`status-${requestId}`);
   const action = document.getElementById(`action-${requestId}`).value;
   const comment = document.getElementById(`comment-${requestId}`).value.trim() || null;
@@ -324,6 +326,14 @@ async function submitAction(requestId, stageKey){
     }
 
     status.className = "status ok"; status.textContent = "✅ Recorded.";
+
+    const topStatus = document.getElementById("topStatus");
+    topStatus.style.display = "block";
+    topStatus.className = action === "decline" ? "status err" : "status ok";
+    topStatus.textContent = (action === "decline" ? "✅ Declined — " : "✅ Approved — ") +
+      referenceNo + " recorded. Refreshing list...";
+    setTimeout(()=>{ topStatus.style.display = "none"; }, 5000);
+
     setTimeout(loadPending, 700);
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + (e.message || e);

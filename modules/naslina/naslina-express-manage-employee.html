@@ -157,7 +157,7 @@ window.addStaff = addStaff;
 async function loadStaffList(){
   const wrap = document.getElementById("staffListWrap");
   const { data: staff, error } = await sb.from("naslina_staff")
-    .select("*, employees(id, employee_id, full_name)")
+    .select("*, employees!naslina_staff_employee_ref_id_fkey(id, employee_id, full_name)")
     .order("created_at", { ascending: false });
   if(error){ wrap.innerHTML = "<div class='sub'>Error: " + error.message + "</div>"; return; }
   if(!staff || !staff.length){ wrap.innerHTML = "<div class='sub'>No one has been added to Naslina Express yet.</div>"; return; }

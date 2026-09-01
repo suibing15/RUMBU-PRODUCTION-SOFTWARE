@@ -84,7 +84,7 @@ async function init(){
     status.style.color = "#1d8a4e"; status.textContent = "Connected.";
     await loadMyRequests();
   }catch(e){
-    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    status.style.color = "#c0392b"; status.textContent = "\u274C " + e.message;
     console.error(e);
   }
 }
@@ -117,7 +117,7 @@ async function renderRequestRow(r){
       .order("action_date", { ascending: false }).limit(1).maybeSingle();
     if(declineAction){
       const dStage = STAGES_BY_ID[declineAction.stage_id];
-      declineHtml = `<div class="rr-decline"><b>Declined at ${dStage ? dStage.stage_name : "—"}:</b> ${declineAction.comment || "No comment given."}</div>`;
+      declineHtml = `<div class="rr-decline"><b>Declined at ${dStage ? dStage.stage_name : "\u2014"}:</b> ${declineAction.comment || "No comment given."}</div>`;
     }
   }
 
@@ -126,7 +126,7 @@ async function renderRequestRow(r){
       <div>
         <div class="rr-ref">${r.reference_no}</div>
         <div class="rr-title">${r.title}</div>
-        <div class="rr-sub">${r.currency} ${Number(r.total_amount).toLocaleString()} · ${r.project_duration_days} day(s) · ${new Date(r.request_date).toLocaleDateString()}${r.cycle > 1 ? " · Resubmission #" + (r.cycle - 1) : ""}</div>
+        <div class="rr-sub">${r.currency} ${Number(r.total_amount).toLocaleString()} \u00B7 ${r.project_duration_days} day(s) \u00B7 ${new Date(r.request_date).toLocaleDateString()}${r.cycle > 1 ? " \u00B7 Resubmission #" + (r.cycle - 1) : ""}</div>
       </div>
       <span class="rr-badge ${r.status}">${stage ? stage.stage_name : r.status}</span>
     </div>
@@ -157,21 +157,21 @@ function renderEditPanel(panel, r){
       <div class="field"><label>Project Duration in Days *</label><input type="number" min="1" id="et-duration-${r.id}" value="${r.project_duration_days}"></div>
     </div>
     <div class="field">
-      <label>Add / Replace Attachments (optional — leave blank to keep what you already submitted)</label>
+      <label>Add / Replace Attachments (optional \u2014 leave blank to keep what you already submitted)</label>
       <div class="dropzone" data-req="${r.id}" data-target="request_form" data-multi="false" data-accept="image/*">
-        <div class="dz-action">Upload image — Request form</div>
+        <div class="dz-action">Upload image \u2014 Request form</div>
         <div class="dz-hint">Drag and drop file or paste from clipboard</div>
         <input type="file" accept="image/*">
       </div>
       <div class="file-list" data-list="${r.id}-request_form"></div>
       <div class="dropzone" style="margin-top:8px;" data-req="${r.id}" data-target="other_document" data-multi="true">
-        <div class="dz-action">Upload files — Other Relevant Document</div>
+        <div class="dz-action">Upload files \u2014 Other Relevant Document</div>
         <div class="dz-hint">Drag and drop files or paste from clipboard</div>
         <input type="file" multiple>
       </div>
       <div class="file-list" data-list="${r.id}-other_document"></div>
       <div class="dropzone" style="margin-top:8px;" data-req="${r.id}" data-target="proforma_invoice" data-multi="false" data-accept="image/*">
-        <div class="dz-action">Upload image — Pre-former Invoice</div>
+        <div class="dz-action">Upload image \u2014 Pre-former Invoice</div>
         <div class="dz-hint">Drag and drop file or paste from clipboard</div>
         <input type="file" accept="image/*">
       </div>
@@ -259,10 +259,10 @@ async function resubmit(requestId){
     }).eq("id", requestId);
     if(updErr) throw updErr;
 
-    status.className = "status ok"; status.textContent = "✅ Resubmitted — back at Task-Force Check.";
+    status.className = "status ok"; status.textContent = "\u2705 Resubmitted \u2014 back at Task-Force Check.";
     setTimeout(loadMyRequests, 700);
   }catch(e){
-    status.className = "status err"; status.textContent = "❌ " + (e.message || e);
+    status.className = "status err"; status.textContent = "\u274C " + (e.message || e);
   }
 }
 window.resubmit = resubmit;

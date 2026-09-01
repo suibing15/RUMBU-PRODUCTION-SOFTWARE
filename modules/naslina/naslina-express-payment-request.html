@@ -199,7 +199,7 @@ async function init(){
     if(!emp){ throw new Error("No employee record is linked to your account, so a request can't be submitted under your name."); }
     MY_EMPLOYEE_ID = emp.id;
 
-    // Only a named set of initiators can submit — see naslina_initiators.
+    // Only a named set of initiators can submit \u2014 see naslina_initiators.
     const { data: initRow, error: initErr } = await sb.from("naslina_initiators")
       .select("id").eq("employee_ref_id", MY_EMPLOYEE_ID).maybeSingle();
     if(initErr) throw initErr;
@@ -214,7 +214,7 @@ async function init(){
     await Promise.all([loadBeneficiaries(), loadCompanies(), loadDepartments()]);
     wireDropzones();
   }catch(e){
-    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    status.style.color = "#c0392b"; status.textContent = "\u274C " + e.message;
     console.error(e);
   }
 }
@@ -223,8 +223,8 @@ async function loadBeneficiaries(){
   const { data, error } = await sb.from("beneficiaries").select("id,name,account_number,bank").eq("is_active", true).order("name");
   const sel = document.getElementById("f_beneficiary_id");
   if(error){ sel.innerHTML = "<option value=''>Error loading recipients</option>"; return; }
-  sel.innerHTML = '<option value="">— Select —</option>' +
-    (data||[]).map(b => `<option value="${b.id}">${b.name} — ${b.account_number} (${b.bank})</option>`).join("") +
+  sel.innerHTML = '<option value="">\u2014 Select \u2014</option>' +
+    (data||[]).map(b => `<option value="${b.id}">${b.name} \u2014 ${b.account_number} (${b.bank})</option>`).join("") +
     '<option value="__new__">+ Add New Recipient</option>';
 }
 
@@ -238,15 +238,15 @@ async function loadCompanies(){
   const { data, error } = await sb.from("naslina_companies").select("id,name").eq("is_active", true).order("name");
   const sel = document.getElementById("f_company_id");
   if(error){ sel.innerHTML = "<option value=''>Error</option>"; return; }
-  sel.innerHTML = '<option value="">— Select —</option>' + (data||[]).map(c => `<option value="${c.id}">${c.name}</option>`).join("");
-  if((data||[]).length === 1) sel.value = data[0].id; // Naslina — only option
+  sel.innerHTML = '<option value="">\u2014 Select \u2014</option>' + (data||[]).map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+  if((data||[]).length === 1) sel.value = data[0].id; // Naslina \u2014 only option
 }
 
 async function loadDepartments(){
   const { data, error } = await sb.from("naslina_departments").select("id,name").eq("is_active", true).order("name");
   const sel = document.getElementById("f_department_id");
   if(error){ sel.innerHTML = "<option value=''>Error</option>"; return; }
-  sel.innerHTML = '<option value="">— Select —</option>' + (data||[]).map(d => `<option value="${d.id}">${d.name}</option>`).join("");
+  sel.innerHTML = '<option value="">\u2014 Select \u2014</option>' + (data||[]).map(d => `<option value="${d.id}">${d.name}</option>`).join("");
   if((data||[]).length === 1) sel.value = data[0].id;
 }
 
@@ -381,7 +381,7 @@ async function submitRequest(){
     document.getElementById("formPanel").style.display = "none";
     document.getElementById("successPanel").style.display = "block";
   }catch(e){
-    status.className = "status err"; status.textContent = "❌ " + (e.message || e);
+    status.className = "status err"; status.textContent = "\u274C " + (e.message || e);
   }finally{
     btn.disabled = false; btn.textContent = "Submit Request";
   }

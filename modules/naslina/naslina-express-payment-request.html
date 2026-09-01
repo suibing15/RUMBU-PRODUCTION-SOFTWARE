@@ -186,11 +186,18 @@ const STAGED_FILES = {
   request_form: [], other_document: [], proforma_invoice: [], proforma_invoice_2: []
 };
 
+let MY_EMPLOYEE_ID = null;
+
 async function init(){
   const status = document.getElementById("connStatus");
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
+
+    const { data: emp, error: empErr } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
+    if(empErr) throw empErr;
+    if(!emp){ throw new Error("No employee record is linked to your account, so a request can't be submitted under your name."); }
+    MY_EMPLOYEE_ID = emp.id;
 
     // Anyone with page access to this module can submit — no extra role
     // check beyond the sidebar's assigned_pages gate. Adjust here if a
@@ -324,7 +331,7 @@ async function submitRequest(){
         account_number: document.getElementById("nb_account_number").value.trim(),
         bank: document.getElementById("nb_bank").value.trim(),
         linked_company: "Naslina",
-        created_by: ME.employeeId || null
+        created_by: MY_EMPLOYEE_ID || null
       };
       if(!nb.name || !nb.account_number || !nb.bank) throw new Error("New recipient name, account number and bank are all required.");
       const { data: inserted, error: nbErr } = await sb.from("beneficiaries").insert(nb).select("id").single();
@@ -350,7 +357,7 @@ async function submitRequest(){
       project_duration_days: Number(duration),
       current_stage_id: firstStage.id,
       status: "in_progress",
-      submitted_by: ME.employeeId
+      submitted_by: MY_EMPLOYEE_ID
     };
     const { data: request, error: reqErr } = await sb.from("naslina_requests").insert(payload).select("id, reference_no").single();
     if(reqErr) throw reqErr;
@@ -364,7 +371,7 @@ async function submitRequest(){
         const { data: pub } = sb.storage.from("request-attachments").getPublicUrl(path);
         await sb.from("naslina_request_attachments").insert({
           request_id: request.id, field_key: key, file_name: file.name,
-          file_url: pub.publicUrl, uploaded_by: ME.employeeId
+          file_url: pub.publicUrl, uploaded_by: MY_EMPLOYEE_ID
         });
       }
     }

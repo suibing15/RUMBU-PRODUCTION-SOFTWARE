@@ -199,10 +199,11 @@ async function init(){
     if(!emp){ throw new Error("No employee record is linked to your account, so a request can't be submitted under your name."); }
     MY_EMPLOYEE_ID = emp.id;
 
-    // Anyone with page access to this module can submit — no extra role
-    // check beyond the sidebar's assigned_pages gate. Adjust here if a
-    // narrower submitter role is introduced later.
-    CAN_SUBMIT = true;
+    // Only a named set of initiators can submit — see naslina_initiators.
+    const { data: initRow, error: initErr } = await sb.from("naslina_initiators")
+      .select("id").eq("employee_ref_id", MY_EMPLOYEE_ID).maybeSingle();
+    if(initErr) throw initErr;
+    CAN_SUBMIT = !!initRow;
     document.getElementById("roBanner").style.display = CAN_SUBMIT ? "none" : "block";
     document.getElementById("formPanel").style.display = CAN_SUBMIT ? "block" : "none";
 

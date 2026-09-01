@@ -443,18 +443,21 @@ async function submitQC(){
     };
 
     // Upsert QC data
-    const { data: existing } = await sb.from("pet_stage2_qc").select("id").eq("collection_id",CURRENT_COLLECTION.id).single();
+    const { data: existing } = await sb.from("pet_stage2_qc").select("id").eq("collection_id",CURRENT_COLLECTION.id).maybeSingle();
     if(existing){
-      await sb.from("pet_stage2_qc").update(qcPayload).eq("collection_id",CURRENT_COLLECTION.id);
+      const { error: qcErr } = await sb.from("pet_stage2_qc").update(qcPayload).eq("collection_id",CURRENT_COLLECTION.id);
+      if(qcErr) throw new Error("Could not save QC data: "+qcErr.message);
     } else {
-      await sb.from("pet_stage2_qc").insert(qcPayload);
+      const { error: qcErr } = await sb.from("pet_stage2_qc").insert(qcPayload);
+      if(qcErr) throw new Error("Could not save QC data: "+qcErr.message);
     }
 
     // Advance status
     const oldStatus = CURRENT_COLLECTION.status;
-    await sb.from("pet_collections").update({ status:"stage2_approval", updated_at: new Date().toISOString() }).eq("id",CURRENT_COLLECTION.id);
+    const { error: stErr } = await sb.from("pet_collections").update({ status:"stage2_approval", updated_at: new Date().toISOString() }).eq("id",CURRENT_COLLECTION.id);
+    if(stErr) throw new Error("QC data was saved, but could not advance status: "+stErr.message);
 
-    await sb.from("pet_activity_log").insert({
+    const { error: logErr } = await sb.from("pet_activity_log").insert({
       collection_id:    CURRENT_COLLECTION.id,
       action:           "stage2_filled",
       stage:            "stage2",
@@ -463,6 +466,7 @@ async function submitQC(){
       old_status:       oldStatus,
       new_status:       "stage2_approval"
     });
+    if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
 
     st.style.color="var(--ok)"; st.textContent="Submitted for approval.";
     setTimeout(()=>{ closeQCForm(); init(); }, 1200);
@@ -479,10 +483,11 @@ function closeQCForm(){
 async function decide(collectionId, stage, decision, note){
   if(decision==="rejected" && !note){ alert("Rejection reason is required."); return; }
   try{
-    const { data: c } = await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
+    const { data: c, error: cErr } = await sb.from("pet_collections").select("section,cycle,status").eq("id",collectionId).single();
+    if(cErr) throw new Error("Could not load collection: "+cErr.message);
 
     // Record this approver's decision
-    await sb.from("pet_approvals").insert({
+    const { error: apprErr } = await sb.from("pet_approvals").insert({
       collection_id:       collectionId,
       stage:               stage,
       cycle:               c.cycle,
@@ -492,39 +497,58 @@ async function decide(collectionId, stage, decision, note){
       correction_note:     note||null,
       decided_at:          new Date().toISOString()
     });
+    if(apprErr) throw new Error("Could not record your decision: "+apprErr.message);
 
     if(decision==="rejected"){
       const newStatus = REJECT_STATUS[stage];
       const newCycle  = (c.cycle||1) + 1;
-      await sb.from("pet_collections").update({ status: newStatus, cycle: newCycle, updated_at: new Date().toISOString() }).eq("id",collectionId);
-      await sb.from("pet_activity_log").insert({
+      const { error: updErr } = await sb.from("pet_collections").update({ status: newStatus, cycle: newCycle, updated_at: new Date().toISOString() }).eq("id",collectionId);
+      if(updErr) throw new Error("Could not update status: "+updErr.message);
+      const { error: logErr } = await sb.from("pet_activity_log").insert({
         collection_id: collectionId, action:"rejected", stage,
         actor_profile_id: ME.id, actor_username: ME.username,
         old_status: c.status, new_status: newStatus, note
       });
+      if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
     } else {
       // Check if all approvers have now approved
       const allApproved = await checkAllApproved(collectionId, stage, c.cycle, c.section);
       if(allApproved){
         const newStatus = NEXT_STATUS[stage];
-        await sb.from("pet_collections").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id",collectionId);
+        const { error: updErr } = await sb.from("pet_collections").update({ status: newStatus, updated_at: new Date().toISOString() }).eq("id",collectionId);
+        if(updErr) throw new Error("Could not advance status: "+updErr.message);
         // Stage 2 approval → occupy the LOT
-        const { data: qc } = await sb.from("pet_stage2_qc").select("lot_id").eq("collection_id",collectionId).single();
+        const { data: qc, error: qcSelErr } = await sb.from("pet_stage2_qc").select("lot_id").eq("collection_id",collectionId).maybeSingle();
+        if(qcSelErr) throw new Error("Status advanced, but could not read QC data to occupy LOT: "+qcSelErr.message);
         if(qc?.lot_id){
-          await sb.from("pet_lots").update({ is_occupied:true, current_collection_id:collectionId }).eq("id",qc.lot_id);
+          // Release any OTHER LOT still tagged to this collection from an earlier
+          // approval cycle (e.g. a correction that switched to a different LOT) —
+          // prevents LOTs being permanently stuck "occupied" after reject/correct loops.
+          const { error: relErr } = await sb.from("pet_lots")
+            .update({ is_occupied:false, current_collection_id:null })
+            .eq("current_collection_id", collectionId)
+            .neq("id", qc.lot_id);
+          if(relErr) console.warn("Could not release a stale LOT link (non-fatal):", relErr.message);
+
+          const { error: lotErr } = await sb.from("pet_lots").update({ is_occupied:true, current_collection_id:collectionId }).eq("id",qc.lot_id);
+          if(lotErr) throw new Error("Status advanced, but could not mark LOT as occupied: "+lotErr.message);
+        } else {
+          console.warn("No LOT recorded on this collection's QC data — LOT occupancy was not set.");
         }
-        await sb.from("pet_activity_log").insert({
+        const { error: logErr } = await sb.from("pet_activity_log").insert({
           collection_id: collectionId, action:"approved_all", stage,
           actor_profile_id: ME.id, actor_username: ME.username,
           old_status: c.status, new_status: newStatus
         });
+        if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
       } else {
-        await sb.from("pet_activity_log").insert({
+        const { error: logErr } = await sb.from("pet_activity_log").insert({
           collection_id: collectionId, action:"approved_partial", stage,
           actor_profile_id: ME.id, actor_username: ME.username,
           old_status: c.status, new_status: c.status,
           note: "Awaiting remaining approvers"
         });
+        if(logErr) console.warn("Activity log entry failed (non-fatal):", logErr.message);
       }
     }
     await init();

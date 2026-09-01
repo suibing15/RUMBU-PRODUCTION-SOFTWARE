@@ -83,7 +83,7 @@ async function init(){
     MY_EMPLOYEE_ID = emp ? emp.id : null;
 
     // Permission gate: Ibrahim Tukur Aliyu and GM only, for now.
-    // No dedicated role flag exists yet for "GM" — until one does,
+    // No dedicated role flag exists yet for "GM" \u2014 until one does,
     // this falls back to admin/super_admin so nobody with a lesser
     // role can edit stage assignments. Tighten once a real GM
     // identifier is available.
@@ -99,7 +99,7 @@ async function init(){
     status.style.color = "#1d8a4e"; status.textContent = "Connected.";
     await loadStaffList();
   }catch(e){
-    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    status.style.color = "#c0392b"; status.textContent = "\u274C " + e.message;
     console.error(e);
   }
 }
@@ -148,7 +148,7 @@ async function addStaff(employeeId){
     document.getElementById("searchResults").style.display = "none";
     await loadStaffList();
   }catch(e){
-    alert("❌ Could not add: " + (e.message || e));
+    alert("\u274C Could not add: " + (e.message || e));
   }
 }
 window.addStaff = addStaff;
@@ -180,8 +180,8 @@ function renderStaffCard(s, assignedSet, initiatorSet){
   el.innerHTML = `
     <div class="sc-head">
       <div>
-        <div class="sc-name">${emp ? emp.full_name : "—"}</div>
-        <div class="sc-id">${emp ? (emp.employee_id || emp.id) : "—"}</div>
+        <div class="sc-name">${emp ? emp.full_name : "\u2014"}</div>
+        <div class="sc-id">${emp ? (emp.employee_id || emp.id) : "\u2014"}</div>
       </div>
       <span class="status-pill ${s.status}">${s.status}</span>
     </div>
@@ -225,7 +225,7 @@ async function toggleInitiator(employeeRefId, checked){
       if(error) throw error;
     }
   }catch(e){
-    alert("❌ Could not update initiator status: " + (e.message || e));
+    alert("\u274C Could not update initiator status: " + (e.message || e));
     await loadStaffList();
   }
 }
@@ -240,7 +240,7 @@ async function saveStaff(staffId){
     if(error) throw error;
     await loadStaffList();
   }catch(e){
-    alert("❌ Could not save: " + (e.message || e));
+    alert("\u274C Could not save: " + (e.message || e));
   }
 }
 window.saveStaff = saveStaff;
@@ -258,7 +258,7 @@ async function toggleStageAssignment(employeeRefId, stageId, checked){
       if(error) throw error;
     }
   }catch(e){
-    alert("❌ Could not update stage assignment: " + (e.message || e));
+    alert("\u274C Could not update stage assignment: " + (e.message || e));
     await loadStaffList(); // revert the checkbox to actual state
   }
 }

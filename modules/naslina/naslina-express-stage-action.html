@@ -90,7 +90,7 @@ async function init(){
 
     await loadPending();
   }catch(e){
-    status.style.color = "#c0392b"; status.textContent = "❌ " + e.message;
+    status.style.color = "#c0392b"; status.textContent = "\u274C " + e.message;
     console.error(e);
   }
 }
@@ -145,16 +145,16 @@ function renderRequestCard(r){
 
   el.innerHTML = `
     <div class="rc-head">
-      <span class="rc-ref">${r.reference_no} — ${r.title}</span>
-      <span class="rc-stage">${stage ? stage.stage_name : "—"}</span>
+      <span class="rc-ref">${r.reference_no} \u2014 ${r.title}</span>
+      <span class="rc-stage">${stage ? stage.stage_name : "\u2014"}</span>
     </div>
     <div class="rc-meta">
-      <div><span class="m-label">Submitted by</span><br>${r.employees ? r.employees.full_name : "—"}</div>
-      <div><span class="m-label">Recipient</span><br>${r.beneficiaries ? r.beneficiaries.name + " — " + r.beneficiaries.account_number : "—"}</div>
-      <div><span class="m-label">Company / Department</span><br>${r.naslina_companies ? r.naslina_companies.name : "—"} / ${r.naslina_departments ? r.naslina_departments.name : "—"}</div>
+      <div><span class="m-label">Submitted by</span><br>${r.employees ? r.employees.full_name : "\u2014"}</div>
+      <div><span class="m-label">Recipient</span><br>${r.beneficiaries ? r.beneficiaries.name + " \u2014 " + r.beneficiaries.account_number : "\u2014"}</div>
+      <div><span class="m-label">Company / Department</span><br>${r.naslina_companies ? r.naslina_companies.name : "\u2014"} / ${r.naslina_departments ? r.naslina_departments.name : "\u2014"}</div>
       <div><span class="m-label">Amount</span><br>${r.currency} ${Number(r.total_amount).toLocaleString()}</div>
       <div><span class="m-label">Duration</span><br>${r.project_duration_days} day(s)</div>
-      <div><span class="m-label">Description</span><br>${r.description || "—"}</div>
+      <div><span class="m-label">Description</span><br>${r.description || "\u2014"}</div>
     </div>
 
     ${showPaymentFields ? `
@@ -197,7 +197,7 @@ function renderRequestCard(r){
       <div class="field">
         <label>ACTION *</label>
         <select id="action-${r.id}">
-          <option value="">— Select —</option>
+          <option value="">\u2014 Select \u2014</option>
           <option value="approve">Approve</option>
           <option value="decline">Decline</option>
         </select>
@@ -297,13 +297,13 @@ async function submitAction(requestId, stageKey, referenceNo){
 
     if(action === "decline"){
       // Reject: send back to submitter. Stage stays put; the "resubmit"
-      // flow (separate page — next phase) bumps cycle and resets to
+      // flow (separate page \u2014 next phase) bumps cycle and resets to
       // stage 1 once the submitter has made their edits.
       const { error: rejErr } = await sb.from("naslina_requests").update({ status: "rejected" }).eq("id", requestId);
       if(rejErr) throw rejErr;
     } else {
       // Approve: check if every assignee on this stage has now approved
-      // for this cycle — if so, advance to the next stage.
+      // for this cycle \u2014 if so, advance to the next stage.
       const { data: assignees } = await sb.from("naslina_workflow_stage_assignees")
         .select("employee_ref_id").eq("stage_id", reqRow.current_stage_id);
       const { data: approvals } = await sb.from("naslina_request_stage_actions")
@@ -325,18 +325,18 @@ async function submitAction(requestId, stageKey, referenceNo){
       }
     }
 
-    status.className = "status ok"; status.textContent = "✅ Recorded.";
+    status.className = "status ok"; status.textContent = "\u2705 Recorded.";
 
     const topStatus = document.getElementById("topStatus");
     topStatus.style.display = "block";
     topStatus.className = action === "decline" ? "status err" : "status ok";
-    topStatus.textContent = (action === "decline" ? "✅ Declined — " : "✅ Approved — ") +
+    topStatus.textContent = (action === "decline" ? "\u2705 Declined \u2014 " : "\u2705 Approved \u2014 ") +
       referenceNo + " recorded. Refreshing list...";
     setTimeout(()=>{ topStatus.style.display = "none"; }, 5000);
 
     setTimeout(loadPending, 700);
   }catch(e){
-    status.className = "status err"; status.textContent = "❌ " + (e.message || e);
+    status.className = "status err"; status.textContent = "\u274C " + (e.message || e);
   }
 }
 window.submitAction = submitAction;

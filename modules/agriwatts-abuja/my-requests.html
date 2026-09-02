@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abuja Office Express Payment Request — My Requests</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){
+    try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme") || "navy"); }catch(e){}
+  })();
+  window.addEventListener("message", function(e){
+    if(e.data && e.data.rumbuTheme){ document.documentElement.setAttribute("data-theme", e.data.rumbuTheme); }
+  });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<style>
+  body{padding:20px;}
+  .wrap{max-width:1000px;margin:0 auto;}
+  #connStatus{font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);}
+  .empty-note{background:var(--bg);border:1px dashed var(--line-2);border-radius:var(--radius);padding:24px;text-align:center;color:var(--muted);font-size:13px;}
+
+  .req-row{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow);}
+  .rr-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .rr-ref{font-weight:800;color:var(--heading);font-size:14px;}
+  .rr-title{color:var(--text);font-size:13px;margin-top:2px;}
+  .rr-badge{border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#fff;white-space:nowrap;}
+  .rr-badge.draft{background:var(--muted);}
+  .rr-badge.in_progress{background:var(--warn);}
+  .rr-badge.completed{background:var(--ok);}
+  .rr-badge.withdrawn{background:var(--muted);}
+  .rr-badge.rejected{background:var(--bad);}
+  .rr-sub{font-size:12px;color:var(--muted);margin-top:4px;}
+  .rr-decline{background:rgba(176,42,55,.08);border:1px solid var(--bad);border-radius:var(--radius-sm);padding:10px 12px;font-size:12.5px;color:var(--text);margin-top:10px;}
+  .rr-decline b{color:var(--bad);}
+  .rr-actions{display:flex;gap:8px;margin-top:10px;}
+
+  .edit-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:14px;display:none;}
+  .edit-panel.show{display:block;}
+
+  .amount-row{display:flex;gap:8px;}
+  .amount-row input{flex:1;}
+  .amount-row select{flex:0 0 100px;}
+
+  .dropzone{background:var(--bg);border:1px dashed var(--line-2);border-radius:var(--radius);padding:18px 12px;text-align:center;cursor:pointer;}
+  .dropzone:hover,.dropzone.drag{border-color:var(--accent);}
+  .dropzone .dz-action{color:var(--primary);font-weight:700;font-size:13px;}
+  .dropzone .dz-hint{font-size:11px;color:var(--muted);margin-top:2px;}
+  .dropzone input[type=file]{display:none;}
+  .file-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
+  .file-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:12px;}
+  .file-chip .fc-remove{color:var(--bad);cursor:pointer;font-weight:700;background:none;border:0;padding:0 4px;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div id="connStatus">Loading...</div>
+
+<div class="card-panel">
+  <h3>My Requests — Abuja Office Express Payment Request</h3>
+  <p class="sub">Everything you've submitted, its current stage, and — for anything declined or withdrawn — an edit-and-resubmit option.</p>
+</div>
+
+<div id="listWrap"></div>
+</div>
+
+<script>
+let ME = null;
+let MY_EMPLOYEE_REF_ID = null;
+let STAGES_BY_ID = {};
+let FIRST_STAGE_ID = null;
+const STAGED_FILES = {}; // requestId -> { field_key: [File,...] }
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+
+    const { data: emp, error: empErr } = await sb.from("employees").select("id").eq("linked_profile_id", ME.id).maybeSingle();
+    if(empErr) throw empErr;
+    if(!emp){ throw new Error("No employee record is linked to your account."); }
+    MY_EMPLOYEE_REF_ID = emp.id;
+
+    const { data: stages, error: stErr } = await sb.from("abuja_workflow_stages").select("*").order("sequence_order");
+    if(stErr) throw stErr;
+    stages.forEach(s => STAGES_BY_ID[s.id] = s);
+    FIRST_STAGE_ID = stages.find(s => s.sequence_order === 1).id;
+
+    status.style.color = "#1d8a4e"; status.textContent = "Connected.";
+    await loadMyRequests();
+  }catch(e){
+    status.style.color = "#c0392b"; status.textContent = "\u274C " + e.message;
+    console.error(e);
+  }
+}
+
+async function loadMyRequests(){
+  const wrap = document.getElementById("listWrap");
+  const { data: requests, error } = await sb.from("abuja_requests")
+    .select("*, abuja_payees(id,name,account_number,bank)")
+    .eq("submitted_by", MY_EMPLOYEE_REF_ID)
+    .order("created_at", { ascending: false });
+  if(error){ wrap.innerHTML = "<div class='empty-note'>Error: " + error.message + "</div>"; return; }
+  if(!requests || !requests.length){ wrap.innerHTML = "<div class='empty-note'>You haven't submitted any requests yet.</div>"; return; }
+
+  wrap.innerHTML = "";
+  for(const r of requests){
+    wrap.appendChild(await renderRequestRow(r));
+  }
+}
+
+async function renderRequestRow(r){
+  const stage = STAGES_BY_ID[r.current_stage_id];
+  const el = document.createElement("div");
+  el.className = "req-row";
+
+  let noteHtml = "";
+  if(r.status === "rejected" || r.status === "draft"){
+    const { data: lastAction } = await sb.from("abuja_request_stage_actions")
+      .select("comment, action_date, stage_id, action")
+      .eq("request_id", r.id).eq("cycle", r.cycle)
+      .in("action", ["decline","withdraw"])
+      .order("action_date", { ascending: false }).limit(1).maybeSingle();
+    if(lastAction){
+      const aStage = STAGES_BY_ID[lastAction.stage_id];
+      const label = lastAction.action === "decline" ? "Declined at" : "Withdrawn at";
+      noteHtml = `<div class="rr-decline"><b>${label} ${aStage ? aStage.stage_name : "\u2014"}:</b> ${lastAction.comment || "No comment given."}</div>`;
+    }
+  }
+
+  const canResubmit = r.status === "rejected" || r.status === "draft";
+  const canWithdraw = r.status === "in_progress";
+
+  el.innerHTML = `
+    <div class="rr-head">
+      <div>
+        <div class="rr-ref">${r.reference_no}</div>
+        <div class="rr-title">${r.title}</div>
+        <div class="rr-sub">${r.currency} ${Number(r.total_amount).toLocaleString()} \u00B7 ${r.project_duration_days} day(s) \u00B7 ${new Date(r.request_date).toLocaleDateString()}${r.cycle > 1 ? " \u00B7 Resubmission #" + (r.cycle - 1) : ""}</div>
+      </div>
+      <span class="rr-badge ${r.status}">${stage ? stage.stage_name : r.status}</span>
+    </div>
+    ${noteHtml}
+    <div class="rr-actions">
+      ${canResubmit ? `<button class="btn-ghost" onclick="toggleEdit('${r.id}')">Edit &amp; Resubmit</button>` : ""}
+      ${canWithdraw ? `<button class="btn-bad btn-sm" onclick="withdraw('${r.id}')">Withdraw</button>` : ""}
+    </div>
+    <div class="edit-panel" id="edit-${r.id}"></div>
+  `;
+
+  if(canResubmit){
+    renderEditPanel(el.querySelector(`#edit-${r.id}`), r);
+  }
+  return el;
+}
+
+function toggleEdit(requestId){
+  const panel = document.getElementById(`edit-${requestId}`);
+  panel.classList.toggle("show");
+}
+window.toggleEdit = toggleEdit;
+
+async function withdraw(requestId){
+  if(!confirm("Withdraw this request? It will move back to draft for you to edit and resubmit.")) return;
+  try{
+    const { error } = await sb.rpc("abuja_withdraw_request", { p_request_id: requestId, p_reason: null });
+    if(error) throw error;
+    await loadMyRequests();
+  }catch(e){
+    alert("Could not withdraw: " + (e.message || e));
+  }
+}
+window.withdraw = withdraw;
+
+function renderEditPanel(panel, r){
+  STAGED_FILES[r.id] = { request_form: [], other_document: [], pre_former_invoice: [], pre_former_invoice2: [] };
+  panel.innerHTML = `
+    <div class="field"><label>Title *</label><input id="et-title-${r.id}" value="${(r.title||"").replace(/"/g,'&quot;')}"></div>
+    <div class="field"><label>Description</label><textarea id="et-desc-${r.id}">${r.description || ""}</textarea></div>
+    <div class="form-row">
+      <div class="field">
+        <label>Total Amount *</label>
+        <div class="amount-row">
+          <input type="number" step="0.01" id="et-amount-${r.id}" value="${r.total_amount}">
+          <select id="et-currency-${r.id}">
+            <option value="NGN" ${r.currency === "NGN" ? "selected" : ""}>NGN</option>
+            <option value="USD" ${r.currency === "USD" ? "selected" : ""}>USD</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Project Duration in Days *</label><input type="number" min="1" id="et-duration-${r.id}" value="${r.project_duration_days}"></div>
+    </div>
+    <div class="field">
+      <label>Add / Replace Attachments (optional \u2014 leave blank to keep what you already submitted)</label>
+      <div class="dropzone" data-req="${r.id}" data-target="request_form" data-multi="false">
+        <div class="dz-action">Upload file \u2014 Request form</div>
+        <div class="dz-hint">Drag and drop file or paste from clipboard</div>
+        <input type="file">
+      </div>
+      <div class="file-list" data-list="${r.id}-request_form"></div>
+      <div class="dropzone" style="margin-top:8px;" data-req="${r.id}" data-target="other_document" data-multi="true">
+        <div class="dz-action">Upload files \u2014 Other Relevant Document</div>
+        <div class="dz-hint">Drag and drop files or paste from clipboard</div>
+        <input type="file" multiple>
+      </div>
+      <div class="file-list" data-list="${r.id}-other_document"></div>
+      <div class="dropzone" style="margin-top:8px;" data-req="${r.id}" data-target="pre_former_invoice" data-multi="false">
+        <div class="dz-action">Upload file \u2014 Pre-former Invoice</div>
+        <div class="dz-hint">Drag and drop file or paste from clipboard</div>
+        <input type="file">
+      </div>
+      <div class="file-list" data-list="${r.id}-pre_former_invoice"></div>
+    </div>
+    <button onclick="resubmit('${r.id}')">Resubmit Request</button>
+    <div class="status" id="et-status-${r.id}"></div>
+  `;
+  wireDropzonesFor(panel, r.id);
+}
+
+function wireDropzonesFor(container, requestId){
+  container.querySelectorAll(".dropzone").forEach(zone=>{
+    const key = zone.getAttribute("data-target");
+    const multi = zone.getAttribute("data-multi") === "true";
+    const input = zone.querySelector("input[type=file]");
+    zone.addEventListener("click", ()=>input.click());
+    input.addEventListener("change", e => stageFiles(requestId, key, multi, e.target.files));
+    zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag"); });
+    zone.addEventListener("dragleave", () => zone.classList.remove("drag"));
+    zone.addEventListener("drop", e => { e.preventDefault(); zone.classList.remove("drag"); stageFiles(requestId, key, multi, e.dataTransfer.files); });
+    zone.addEventListener("paste", e => {
+      const items = (e.clipboardData || {}).files;
+      if(items && items.length) stageFiles(requestId, key, multi, items);
+    });
+  });
+}
+
+function stageFiles(requestId, key, multi, fileList){
+  const files = Array.from(fileList || []);
+  if(!files.length) return;
+  if(multi) STAGED_FILES[requestId][key].push(...files);
+  else STAGED_FILES[requestId][key] = [files[0]];
+  renderFileList(requestId, key);
+}
+
+function renderFileList(requestId, key){
+  const wrap = document.querySelector(`.file-list[data-list="${requestId}-${key}"]`);
+  if(!wrap) return;
+  wrap.innerHTML = STAGED_FILES[requestId][key].map((f, i) =>
+    `<div class="file-chip"><span>${f.name}</span><button class="fc-remove" onclick="removeStagedFile('${requestId}','${key}',${i})">&times;</button></div>`
+  ).join("");
+}
+
+function removeStagedFile(requestId, key, idx){
+  STAGED_FILES[requestId][key].splice(idx, 1);
+  renderFileList(requestId, key);
+}
+window.removeStagedFile = removeStagedFile;
+
+async function resubmit(requestId){
+  const status = document.getElementById(`et-status-${requestId}`);
+  const title = document.getElementById(`et-title-${requestId}`).value.trim();
+  const description = document.getElementById(`et-desc-${requestId}`).value.trim() || null;
+  const amount = document.getElementById(`et-amount-${requestId}`).value;
+  const currency = document.getElementById(`et-currency-${requestId}`).value;
+  const duration = document.getElementById(`et-duration-${requestId}`).value;
+
+  if(!title || amount === "" || !duration){
+    status.className = "status err"; status.textContent = "Title, Total Amount and Project Duration are required.";
+    return;
+  }
+
+  const requiresRequestForm = !STAGED_FILES[requestId].request_form.length;
+  if(requiresRequestForm){
+    const { count } = await sb.from("abuja_request_attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("request_id", requestId).eq("field_key", "request_form");
+    if(!count){
+      status.className = "status err"; status.textContent = "Request form is required \u2014 upload one before resubmitting.";
+      return;
+    }
+  }
+
+  status.className = "status"; status.textContent = "Resubmitting...";
+  try{
+    for(const key of Object.keys(STAGED_FILES[requestId])){
+      for(const file of STAGED_FILES[requestId][key]){
+        const path = `abuja/${requestId}/${key}/${Date.now()}_${file.name}`;
+        const { error: upErr } = await sb.storage.from("request-attachments").upload(path, file);
+        if(upErr) throw upErr;
+        const { data: pub } = sb.storage.from("request-attachments").getPublicUrl(path);
+        await sb.from("abuja_request_attachments").insert({
+          request_id: requestId, field_key: key, file_name: file.name,
+          file_url: pub.publicUrl, uploaded_by: MY_EMPLOYEE_REF_ID
+        });
+      }
+    }
+
+    const { error: updErr } = await sb.from("abuja_requests").update({
+      title, description, total_amount: Number(amount), currency,
+      project_duration_days: Number(duration)
+    }).eq("id", requestId);
+    if(updErr) throw updErr;
+
+    const { error: rpcErr } = await sb.rpc("abuja_resubmit_request", { p_request_id: requestId });
+    if(rpcErr) throw rpcErr;
+
+    status.className = "status ok"; status.textContent = "\u2705 Resubmitted \u2014 back at Task-Force Check.";
+    setTimeout(loadMyRequests, 700);
+  }catch(e){
+    status.className = "status err"; status.textContent = "\u274C " + (e.message || e);
+  }
+}
+window.resubmit = resubmit;
+
+init();
+</script>
+</body>
+</html>

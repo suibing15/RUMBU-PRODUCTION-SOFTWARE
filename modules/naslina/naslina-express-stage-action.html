@@ -208,7 +208,7 @@ function renderRequestCard(r){
       </div>
     </div>
 
-    <button onclick="submitAction(${r.id}, '${stageKey}', '${r.reference_no}')">Submit</button>
+    <button onclick="submitAction('${r.id}', '${stageKey}', '${r.reference_no}')">Submit</button>
     <div class="status" id="status-${r.id}"></div>
   `;
 
@@ -248,7 +248,7 @@ function renderFileList(requestId, key){
   const wrap = document.querySelector(`.file-list[data-list="${requestId}-${key}"]`);
   if(!wrap) return;
   wrap.innerHTML = STAGED_FILES[requestId][key].map((f, i) =>
-    `<div class="file-chip"><span>${f.name}</span><button class="fc-remove" onclick="removeStagedFile(${requestId},'${key}',${i})">&times;</button></div>`
+    `<div class="file-chip"><span>${f.name}</span><button class="fc-remove" onclick="removeStagedFile('${requestId}','${key}',${i})">&times;</button></div>`
   ).join("");
 }
 

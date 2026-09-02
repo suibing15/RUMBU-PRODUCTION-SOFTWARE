@@ -131,7 +131,7 @@ async function renderRequestRow(r){
       <span class="rr-badge ${r.status}">${stage ? stage.stage_name : r.status}</span>
     </div>
     ${declineHtml}
-    ${r.status === "rejected" ? `<button class="btn-ghost" style="margin-top:10px;" onclick="toggleEdit(${r.id})">Edit &amp; Resubmit</button>` : ""}
+    ${r.status === "rejected" ? `<button class="btn-ghost" style="margin-top:10px;" onclick="toggleEdit('${r.id}')">Edit &amp; Resubmit</button>` : ""}
     <div class="edit-panel" id="edit-${r.id}"></div>
   `;
 
@@ -177,7 +177,7 @@ function renderEditPanel(panel, r){
       </div>
       <div class="file-list" data-list="${r.id}-proforma_invoice"></div>
     </div>
-    <button onclick="resubmit(${r.id})">Resubmit Request</button>
+    <button onclick="resubmit('${r.id}')">Resubmit Request</button>
     <div class="status" id="et-status-${r.id}"></div>
   `;
   wireDropzonesFor(panel, r.id);
@@ -212,7 +212,7 @@ function renderFileList(requestId, key){
   const wrap = document.querySelector(`.file-list[data-list="${requestId}-${key}"]`);
   if(!wrap) return;
   wrap.innerHTML = STAGED_FILES[requestId][key].map((f, i) =>
-    `<div class="file-chip"><span>${f.name}</span><button class="fc-remove" onclick="removeStagedFile(${requestId},'${key}',${i})">&times;</button></div>`
+    `<div class="file-chip"><span>${f.name}</span><button class="fc-remove" onclick="removeStagedFile('${requestId}','${key}',${i})">&times;</button></div>`
   ).join("");
 }
 

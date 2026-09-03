@@ -172,6 +172,34 @@
   <div class="tab-content hidden" id="tab-employee-directory">
     <h3>Employee Directory</h3>
     <p class="sub">Browse all employees. Pick a role and click Grant Access to convert one into a Super Admin, Admin, or User account.</p>
+
+    <button class="ghost" onclick="toggleAddEmployeePanel()" id="addEmpToggleBtn" style="margin-bottom:12px;">+ Add New Employee</button>
+    <div class="hidden" id="addEmployeePanel" style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+      <h4 style="margin-top:0;">Add New Employee</h4>
+      <div class="form-row">
+        <div class="field"><label>Employee ID *</label><input id="new_emp_employee_id" placeholder="e.g. RIG-0142"></div>
+        <div class="field"><label>Full Name *</label><input id="new_emp_full_name" placeholder="Full name"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Branch</label>
+          <select id="new_emp_branch" onchange="onNewEmpBranchChange()"><option value="">— none —</option></select>
+        </div>
+        <div class="field"><label>Department</label>
+          <select id="new_emp_department" onchange="onNewEmpDepartmentChange()" disabled><option value="">— select a Branch first —</option></select>
+        </div>
+        <div class="field"><label>Unit</label>
+          <select id="new_emp_unit" disabled><option value="">— none —</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Rank</label><input id="new_emp_rank" list="new_emp_rank_list" placeholder="e.g. Officer"><datalist id="new_emp_rank_list"></datalist></div>
+        <div class="field"><label>Salary (₦)</label><input id="new_emp_salary" type="number" step="0.01" placeholder="Leave blank if unknown"></div>
+      </div>
+      <button onclick="addEmployee()">ADD EMPLOYEE</button>
+      <button class="ghost" onclick="toggleAddEmployeePanel()">Cancel</button>
+      <div class="status" id="add_emp_status"></div>
+    </div>
+
     <div class="form-row">
       <div class="field"><label>Search</label><input id="emp_search" placeholder="Search by name, ID, or department" oninput="renderEmployeeDirectory()"></div>
       <div class="field"><label>Branch</label>
@@ -255,6 +283,31 @@
 <div class="hidden" id="adminEmployeeDirectory">
   <h3>Employee Directory</h3>
   <p class="sub">Employees in your Branch(es) only. Search, then Grant Access to create their User account below — prefilled from their name.</p>
+
+  <button class="ghost" onclick="toggleAddEmployeePanelAdmin()" id="addEmpToggleBtnAdmin" style="margin-bottom:12px;">+ Add New Employee</button>
+  <div class="hidden" id="addEmployeePanelAdmin" style="border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+    <h4 style="margin-top:0;">Add New Employee</h4>
+    <div class="form-row">
+      <div class="field"><label>Employee ID *</label><input id="admin_new_emp_employee_id" placeholder="e.g. RIG-0142"></div>
+      <div class="field"><label>Full Name *</label><input id="admin_new_emp_full_name" placeholder="Full name"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Branch</label>
+        <select id="admin_new_emp_branch" onchange="onNewEmpBranchChangeAdmin()"><option value="">— select —</option></select>
+      </div>
+      <div class="field"><label>Department</label>
+        <select id="admin_new_emp_department" onchange="onNewEmpDepartmentChangeAdmin()" disabled><option value="">— select a Branch first —</option></select>
+      </div>
+      <div class="field"><label>Unit</label>
+        <select id="admin_new_emp_unit" disabled><option value="">— none —</option></select>
+      </div>
+    </div>
+    <div class="field"><label>Rank</label><input id="admin_new_emp_rank" list="admin_new_emp_rank_list" placeholder="e.g. Officer"><datalist id="admin_new_emp_rank_list"></datalist></div>
+    <button onclick="addEmployeeAsAdmin()">ADD EMPLOYEE</button>
+    <button class="ghost" onclick="toggleAddEmployeePanelAdmin()">Cancel</button>
+    <div class="status" id="add_emp_status_admin"></div>
+  </div>
+
   <div class="form-row">
     <div class="field"><label>Search</label><input id="admin_emp_search" placeholder="Search by name, ID, or department" oninput="renderAdminEmployeeDirectory()"></div>
     <div class="field"><label>Branch</label>
@@ -1245,6 +1298,161 @@ async function loadEmployeeDirectory(){
     renderAdminEmployeeDirectory();
   }catch(e){
     if(status) status.textContent = "Could not load employees: " + (e.message||e);
+  }
+}
+
+// =========================================================
+// ADD EMPLOYEE — Super Admin (full Branch list + Salary) and Admin
+// (Branch locked to ME.sectionNames, no Salary) share the same cascading
+// Branch -> Department -> Unit lookups already used by "Manage Departments
+// & Units" (the `departments`/`units` tables), so a new employee always
+// gets a real, consistent Department/Unit rather than free-typed text.
+// =========================================================
+function toggleAddEmployeePanel(){
+  const panel = document.getElementById("addEmployeePanel");
+  const opening = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  if(opening){
+    const sel = document.getElementById("new_emp_branch");
+    if(sel.options.length <= 1){
+      sel.innerHTML = '<option value="">— none —</option>' + BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join("");
+    }
+    const ranks = [...new Set(EMPLOYEES.map(e=>e.rank).filter(Boolean))].sort();
+    document.getElementById("new_emp_rank_list").innerHTML = ranks.map(r=>`<option value="${r}">`).join("");
+  }
+}
+
+function toggleAddEmployeePanelAdmin(){
+  const panel = document.getElementById("addEmployeePanelAdmin");
+  const opening = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  if(opening){
+    const sel = document.getElementById("admin_new_emp_branch");
+    if(sel.options.length <= 1){
+      sel.innerHTML = '<option value="">— select —</option>' + (ME.sectionNames||[]).map(b=>`<option value="${b}">${b}</option>`).join("");
+    }
+    const ranks = [...new Set(EMPLOYEES.map(e=>e.rank).filter(Boolean))].sort();
+    document.getElementById("admin_new_emp_rank_list").innerHTML = ranks.map(r=>`<option value="${r}">`).join("");
+  }
+}
+
+async function loadDeptOptionsForBranch(branch, deptSelId, unitSelId){
+  const deptSel = document.getElementById(deptSelId);
+  const unitSel = document.getElementById(unitSelId);
+  unitSel.innerHTML = '<option value="">— none —</option>'; unitSel.disabled = true;
+  if(!branch){ deptSel.innerHTML = '<option value="">— select a Branch first —</option>'; deptSel.disabled = true; return; }
+  deptSel.disabled = false;
+  deptSel.innerHTML = '<option value="">Loading...</option>';
+  const { data, error } = await sb.from("departments").select("id,name").eq("section", branch).order("name");
+  deptSel.innerHTML = '<option value="">— none —</option>' + (error ? "" : (data||[]).map(d=>`<option value="${d.id}">${d.name}</option>`).join(""));
+}
+
+async function loadUnitOptionsForDept(deptId, unitSelId){
+  const unitSel = document.getElementById(unitSelId);
+  if(!deptId){ unitSel.innerHTML = '<option value="">— none —</option>'; unitSel.disabled = true; return; }
+  unitSel.disabled = false;
+  unitSel.innerHTML = '<option value="">Loading...</option>';
+  const { data, error } = await sb.from("units").select("id,name").eq("department_id", deptId).order("name");
+  unitSel.innerHTML = '<option value="">— none —</option>' + (error ? "" : (data||[]).map(u=>`<option value="${u.id}">${u.name}</option>`).join(""));
+}
+
+function onNewEmpBranchChange(){ loadDeptOptionsForBranch(document.getElementById("new_emp_branch").value, "new_emp_department", "new_emp_unit"); }
+function onNewEmpDepartmentChange(){
+  const deptSel = document.getElementById("new_emp_department");
+  loadUnitOptionsForDept(deptSel.value, "new_emp_unit");
+}
+function onNewEmpBranchChangeAdmin(){ loadDeptOptionsForBranch(document.getElementById("admin_new_emp_branch").value, "admin_new_emp_department", "admin_new_emp_unit"); }
+function onNewEmpDepartmentChangeAdmin(){
+  const deptSel = document.getElementById("admin_new_emp_department");
+  loadUnitOptionsForDept(deptSel.value, "admin_new_emp_unit");
+}
+
+async function addEmployee(){
+  const status = document.getElementById("add_emp_status");
+  const employeeId = document.getElementById("new_emp_employee_id").value.trim();
+  const fullName   = document.getElementById("new_emp_full_name").value.trim();
+  const branch     = document.getElementById("new_emp_branch").value || null;
+  const deptSel    = document.getElementById("new_emp_department");
+  const deptName   = deptSel.value ? deptSel.options[deptSel.selectedIndex].text : null;
+  const unitSel    = document.getElementById("new_emp_unit");
+  const unitName   = unitSel.value ? unitSel.options[unitSel.selectedIndex].text : null;
+  const rank       = document.getElementById("new_emp_rank").value.trim() || null;
+  const salaryVal  = document.getElementById("new_emp_salary").value;
+
+  if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
+  if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
+
+  status.className = "status"; status.textContent = "Adding...";
+  try{
+    const { data: inserted, error } = await sb.from("employees").insert({
+      employee_id: employeeId, full_name: fullName, branch, department: deptName, unit: unitName, rank
+    }).select("id").single();
+    if(error) throw error;
+
+    if(salaryVal){
+      const { error: salErr } = await sb.from("employee_salaries").insert({ employee_id: inserted.id, salary: Number(salaryVal) });
+      if(salErr) throw new Error("Employee was created, but salary could not be saved: " + salErr.message);
+    }
+
+    status.className = "status ok"; status.textContent = "✅ Employee added.";
+    await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
+
+    ["new_emp_employee_id","new_emp_full_name","new_emp_rank","new_emp_salary"].forEach(id=>document.getElementById(id).value="");
+    document.getElementById("new_emp_branch").value = "";
+    document.getElementById("new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
+    document.getElementById("new_emp_department").disabled = true;
+    document.getElementById("new_emp_unit").innerHTML = '<option value="">— none —</option>';
+    document.getElementById("new_emp_unit").disabled = true;
+
+    await loadEmployeeDirectory();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = (e.message && e.message.toLowerCase().indexOf("duplicate") !== -1)
+      ? "❌ That Employee ID is already in use."
+      : "❌ " + (e.message||e);
+  }
+}
+
+async function addEmployeeAsAdmin(){
+  const status = document.getElementById("add_emp_status_admin");
+  const employeeId = document.getElementById("admin_new_emp_employee_id").value.trim();
+  const fullName   = document.getElementById("admin_new_emp_full_name").value.trim();
+  const branch     = document.getElementById("admin_new_emp_branch").value;
+  const deptSel    = document.getElementById("admin_new_emp_department");
+  const deptName   = deptSel.value ? deptSel.options[deptSel.selectedIndex].text : null;
+  const unitSel    = document.getElementById("admin_new_emp_unit");
+  const unitName   = unitSel.value ? unitSel.options[unitSel.selectedIndex].text : null;
+  const rank       = document.getElementById("admin_new_emp_rank").value.trim() || null;
+
+  if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
+  if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
+  if(!branch || !(ME.sectionNames||[]).includes(branch)){
+    status.className="status err"; status.textContent="Select one of your assigned Branch(es).";
+    return;
+  }
+
+  status.className = "status"; status.textContent = "Adding...";
+  try{
+    const { error } = await sb.from("employees").insert({
+      employee_id: employeeId, full_name: fullName, branch, department: deptName, unit: unitName, rank
+    });
+    if(error) throw error;
+
+    status.className = "status ok"; status.textContent = "✅ Employee added.";
+    await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
+
+    ["admin_new_emp_employee_id","admin_new_emp_full_name","admin_new_emp_rank"].forEach(id=>document.getElementById(id).value="");
+    document.getElementById("admin_new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
+    document.getElementById("admin_new_emp_department").disabled = true;
+    document.getElementById("admin_new_emp_unit").innerHTML = '<option value="">— none —</option>';
+    document.getElementById("admin_new_emp_unit").disabled = true;
+
+    await loadEmployeeDirectory();
+  }catch(e){
+    status.className = "status err";
+    status.textContent = (e.message && e.message.toLowerCase().indexOf("duplicate") !== -1)
+      ? "❌ That Employee ID is already in use."
+      : "❌ " + (e.message||e);
   }
 }
 

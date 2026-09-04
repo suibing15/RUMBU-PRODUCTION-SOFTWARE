@@ -178,11 +178,12 @@
       <h4 style="margin-top:0;">Add New Employee</h4>
       <div class="form-row">
         <div class="field"><label>Employee ID *</label><input id="new_emp_employee_id" placeholder="e.g. RIG-0142"></div>
-        <div class="field"><label>Full Name *</label><input id="new_emp_full_name" placeholder="Full name"></div>
+        <div class="field"><label>Full Name *</label><input id="new_emp_full_name" placeholder="Full name" oninput="checkPossibleDuplicateEmployee('new_emp_full_name','new_emp_branch','new_emp_dup_warn')"></div>
       </div>
+      <div class="status" id="new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
       <div class="form-row">
         <div class="field"><label>Branch</label>
-          <select id="new_emp_branch" onchange="onNewEmpBranchChange()"><option value="">— none —</option></select>
+          <select id="new_emp_branch" onchange="onNewEmpBranchChange(); checkPossibleDuplicateEmployee('new_emp_full_name','new_emp_branch','new_emp_dup_warn');"><option value="">— none —</option></select>
         </div>
         <div class="field"><label>Department</label>
           <select id="new_emp_department" onchange="onNewEmpDepartmentChange()" disabled><option value="">— select a Branch first —</option></select>
@@ -289,11 +290,12 @@
     <h4 style="margin-top:0;">Add New Employee</h4>
     <div class="form-row">
       <div class="field"><label>Employee ID *</label><input id="admin_new_emp_employee_id" placeholder="e.g. RIG-0142"></div>
-      <div class="field"><label>Full Name *</label><input id="admin_new_emp_full_name" placeholder="Full name"></div>
+      <div class="field"><label>Full Name *</label><input id="admin_new_emp_full_name" placeholder="Full name" oninput="checkPossibleDuplicateEmployee('admin_new_emp_full_name','admin_new_emp_branch','admin_new_emp_dup_warn')"></div>
     </div>
+    <div class="status" id="admin_new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
     <div class="form-row">
       <div class="field"><label>Branch</label>
-        <select id="admin_new_emp_branch" onchange="onNewEmpBranchChangeAdmin()"><option value="">— select —</option></select>
+        <select id="admin_new_emp_branch" onchange="onNewEmpBranchChangeAdmin(); checkPossibleDuplicateEmployee('admin_new_emp_full_name','admin_new_emp_branch','admin_new_emp_dup_warn');"><option value="">— select —</option></select>
       </div>
       <div class="field"><label>Department</label>
         <select id="admin_new_emp_department" onchange="onNewEmpDepartmentChangeAdmin()" disabled><option value="">— select a Branch first —</option></select>
@@ -1246,6 +1248,8 @@ async function createUser(){
 // =========================================================
 let EMPLOYEES = [];
 let BRANCH_OPTIONS = [];
+let ALL_DEPARTMENTS = []; // {id, name, section} — every real Department, all Branches, loaded once for the Employee Directory's inline Department/Unit editors
+let ALL_UNITS = [];       // {id, name, department_id}
 let PENDING_EMPLOYEE = null; // set by grantAccessFromEmployee, consumed after account creation succeeds
 
 async function loadEmployeeDirectory(){
@@ -1278,6 +1282,19 @@ async function loadEmployeeDirectory(){
     if(!BRANCH_OPTIONS.length){
       const { data: sections } = await sb.from("app_sections").select("name").order("name");
       BRANCH_OPTIONS = (sections||[]).map(s=>s.name);
+    }
+    // Load every real Department/Unit once too, for the Employee Directory's
+    // inline Department/Unit dropdowns — same source of truth as "Manage
+    // Departments & Units", refreshed every time the directory reloads so a
+    // department/unit added there shows up here without a page refresh.
+    const { data: deptRows } = await sb.from("departments").select("id,name,section").order("name");
+    ALL_DEPARTMENTS = deptRows || [];
+    const deptIds = ALL_DEPARTMENTS.map(d=>d.id);
+    if(deptIds.length){
+      const { data: unitRows } = await sb.from("units").select("id,name,department_id").in("department_id", deptIds).order("name");
+      ALL_UNITS = unitRows || [];
+    } else {
+      ALL_UNITS = [];
     }
     const branchFilter = document.getElementById("emp_branch_filter");
     if(branchFilter && branchFilter.options.length <= 1){
@@ -1322,6 +1339,23 @@ function toggleAddEmployeePanel(){
   }
 }
 
+// Soft duplicate-person warning — same Full Name already exists in the
+// same Branch. Non-blocking (two real people can share a name), just a
+// heads-up so the admin can double-check before creating a second record.
+function checkPossibleDuplicateEmployee(nameInputId, branchSelId, warnElId){
+  const name = document.getElementById(nameInputId).value.trim().toLowerCase();
+  const branch = document.getElementById(branchSelId).value;
+  const warnEl = document.getElementById(warnElId);
+  if(!name || !branch){ warnEl.style.display = "none"; return; }
+  const match = EMPLOYEES.find(e => e.branch === branch && (e.full_name||"").trim().toLowerCase() === name);
+  if(match){
+    warnEl.style.display = "block";
+    warnEl.textContent = "⚠️ " + match.full_name + " (" + match.employee_id + ") already exists in " + branch + ". Confirm this is a different person before adding.";
+  } else {
+    warnEl.style.display = "none";
+  }
+}
+
 function toggleAddEmployeePanelAdmin(){
   const panel = document.getElementById("addEmployeePanelAdmin");
   const opening = panel.classList.contains("hidden");
@@ -1335,7 +1369,6 @@ function toggleAddEmployeePanelAdmin(){
     document.getElementById("admin_new_emp_rank_list").innerHTML = ranks.map(r=>`<option value="${r}">`).join("");
   }
 }
-
 async function loadDeptOptionsForBranch(branch, deptSelId, unitSelId){
   const deptSel = document.getElementById(deptSelId);
   const unitSel = document.getElementById(unitSelId);
@@ -1397,6 +1430,7 @@ async function addEmployee(){
     status.className = "status ok"; status.textContent = "✅ Employee added.";
     await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
 
+    document.getElementById("new_emp_dup_warn").style.display = "none";
     ["new_emp_employee_id","new_emp_full_name","new_emp_rank","new_emp_salary"].forEach(id=>document.getElementById(id).value="");
     document.getElementById("new_emp_branch").value = "";
     document.getElementById("new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
@@ -1441,6 +1475,7 @@ async function addEmployeeAsAdmin(){
     status.className = "status ok"; status.textContent = "✅ Employee added.";
     await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
 
+    document.getElementById("admin_new_emp_dup_warn").style.display = "none";
     ["admin_new_emp_employee_id","admin_new_emp_full_name","admin_new_emp_rank"].forEach(id=>document.getElementById(id).value="");
     document.getElementById("admin_new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
     document.getElementById("admin_new_emp_department").disabled = true;
@@ -1453,6 +1488,61 @@ async function addEmployeeAsAdmin(){
     status.textContent = (e.message && e.message.toLowerCase().indexOf("duplicate") !== -1)
       ? "❌ That Employee ID is already in use."
       : "❌ " + (e.message||e);
+  }
+}
+
+// Builds the inline Department/Unit <select> HTML for one Employee
+// Directory row. Department options are every real Department belonging
+// to that employee's current Branch; Unit options are every real Unit
+// belonging to that employee's current Department. Both come from
+// ALL_DEPARTMENTS/ALL_UNITS, loaded once in loadEmployeeDirectory().
+function buildDeptSelectHtml(e, selectId, statusElId){
+  const depts = ALL_DEPARTMENTS.filter(d => d.section === e.branch);
+  const options = '<option value="">— none —</option>' +
+    depts.map(d=>`<option value="${d.name}" ${e.department===d.name?"selected":""}>${d.name}</option>`).join("");
+  return `<select id="${selectId}" style="width:auto;" onchange="setEmployeeDepartment(${e.id}, this.value, '${statusElId}')">${options}</select>`;
+}
+function buildUnitSelectHtml(e, selectId, statusElId){
+  const dept = ALL_DEPARTMENTS.find(d => d.section === e.branch && d.name === e.department);
+  const units = dept ? ALL_UNITS.filter(u => u.department_id === dept.id) : [];
+  const options = '<option value="">— none —</option>' +
+    units.map(u=>`<option value="${u.name}" ${e.unit===u.name?"selected":""}>${u.name}</option>`).join("");
+  return `<select id="${selectId}" style="width:auto;" onchange="setEmployeeUnit(${e.id}, this.value, '${statusElId}')">${options}</select>`;
+}
+
+// Updates an employee's Department directly from the inline dropdown.
+// Changing Department also clears Unit (a Unit belongs to exactly one
+// Department, so the old one is very unlikely to still apply) and
+// refreshes both directory tables so the Unit dropdown for this row
+// rebuilds against the new Department's real Units.
+async function setEmployeeDepartment(empId, newDeptName, statusElId){
+  const status = document.getElementById(statusElId||"emp_dir_status");
+  try{
+    const { error } = await sb.from("employees").update({ department: newDeptName || null, unit: null }).eq("id", empId);
+    if(error) throw error;
+    const emp = EMPLOYEES.find(e=>e.id === empId);
+    if(emp){ emp.department = newDeptName || null; emp.unit = null; }
+    if(status){ status.className = ""; status.textContent = "✅ Department updated."; }
+    await logActivity("employee_department_set", ME.username + " set department to \"" + (newDeptName||"none") + "\" for employee #" + empId);
+    renderEmployeeDirectory();
+    renderAdminEmployeeDirectory();
+  }catch(e){
+    if(status) status.textContent = "❌ Could not update department: " + (e.message||e);
+  }
+}
+
+// Updates an employee's Unit directly from the inline dropdown.
+async function setEmployeeUnit(empId, newUnitName, statusElId){
+  const status = document.getElementById(statusElId||"emp_dir_status");
+  try{
+    const { error } = await sb.from("employees").update({ unit: newUnitName || null }).eq("id", empId);
+    if(error) throw error;
+    const emp = EMPLOYEES.find(e=>e.id === empId);
+    if(emp) emp.unit = newUnitName || null;
+    if(status){ status.className = ""; status.textContent = "✅ Unit updated."; }
+    await logActivity("employee_unit_set", ME.username + " set unit to \"" + (newUnitName||"none") + "\" for employee #" + empId);
+  }catch(e){
+    if(status) status.textContent = "❌ Could not update unit: " + (e.message||e);
   }
 }
 
@@ -1485,8 +1575,8 @@ function renderEmployeeDirectory(){
       BRANCH_OPTIONS.map(b=>`<option value="${b}" ${e.branch===b?"selected":""}>${b}</option>`).join("");
     html += "<tr><td>" + e.employee_id + "</td><td>" + e.full_name + "</td>" +
       "<td><select id=\"branch_pick_" + e.id + "\" style=\"width:auto;\" onchange=\"setEmployeeBranch(" + e.id + ", this.value)\">" + branchOptionsHtml + "</select></td>" +
-      "<td>" + (e.department||"") + "</td>" +
-      "<td>" + (e.unit||"") + "</td><td>" + salaryText + "</td>";
+      "<td>" + buildDeptSelectHtml(e, "dept_pick_"+e.id, "emp_dir_status") + "</td>" +
+      "<td>" + buildUnitSelectHtml(e, "unit_pick_"+e.id, "emp_dir_status") + "</td><td>" + salaryText + "</td>";
 
     if(e.has_system_access){
       html += "<td><span class=\"badge\">" + (e.linked_role || "access") + "</span></td><td>";
@@ -1554,8 +1644,8 @@ function renderAdminEmployeeDirectory(){
   rows.forEach(e=>{
     html += "<tr><td>" + e.employee_id + "</td><td>" + e.full_name + "</td>" +
       "<td>" + (e.branch||"") + "</td>" +
-      "<td>" + (e.department||"") + "</td>" +
-      "<td>" + (e.unit||"") + "</td>";
+      "<td>" + buildDeptSelectHtml(e, "admin_dept_pick_"+e.id, "admin_emp_dir_status") + "</td>" +
+      "<td>" + buildUnitSelectHtml(e, "admin_unit_pick_"+e.id, "admin_emp_dir_status") + "</td>";
     if(e.has_system_access){
       // Admin can see who already has access but cannot change roles —
       // that stays a Super Admin action.
@@ -1588,12 +1678,16 @@ window.grantAccessFromEmployeeAsAdmin = grantAccessFromEmployeeAsAdmin;
 async function setEmployeeBranch(empId, newBranch){
   const status = document.getElementById("emp_dir_status");
   try{
-    const { error } = await sb.from("employees").update({ branch: newBranch || null }).eq("id", empId);
+    // Department/Unit belong to a specific Branch, so a Branch change clears
+    // both — same reasoning as Department clearing Unit above.
+    const { error } = await sb.from("employees").update({ branch: newBranch || null, department: null, unit: null }).eq("id", empId);
     if(error) throw error;
     const emp = EMPLOYEES.find(e=>e.id === empId);
-    if(emp) emp.branch = newBranch || null;
-    if(status){ status.className = ""; status.textContent = "✅ Branch updated."; }
+    if(emp){ emp.branch = newBranch || null; emp.department = null; emp.unit = null; }
+    if(status){ status.className = ""; status.textContent = "✅ Branch updated. Department/Unit were cleared — set them again for the new Branch."; }
     await logActivity("employee_branch_set", ME.username + " set branch to \"" + (newBranch||"none") + "\" for employee #" + empId);
+    renderEmployeeDirectory();
+    renderAdminEmployeeDirectory();
   }catch(e){
     if(status) status.textContent = "❌ Could not update branch: " + (e.message||e);
   }

@@ -400,6 +400,13 @@
     // Remember which page is open so the quick-links bar can highlight it.
     CURRENT_PAGE = dept + "/" + module;
     CURRENT_QUERY = query || "";
+    // Also persist it to localStorage — a browser refresh destroys this
+    // whole document (including CURRENT_PAGE), so without this a refresh
+    // always dumps the person back on the dashboard landing, mid-task.
+    // See restoreOpenModule(), called once at the end of initAuth().
+    try{
+      localStorage.setItem("rumbu_open_module", JSON.stringify({ dept, module, label: label||"", query: query||"" }));
+    }catch(e){}
     renderQuickLinks();
     document.getElementById("pickerView").classList.remove("show");
     view.classList.add("show");
@@ -420,6 +427,22 @@
     document.getElementById("landing").style.display = "";
     document.getElementById("appShell").classList.remove("module-open");
     hideFlyout();
+    try{ localStorage.removeItem("rumbu_open_module"); }catch(e){}
+  }
+
+  // Called once, after a successful initAuth(), to reopen whatever module
+  // was on screen before a browser refresh. Restores the SAME PAGE — it
+  // cannot restore unsaved, half-typed form values inside that page (a
+  // refresh always destroys the iframe's in-memory state; that part is
+  // normal browser behavior, same as any website). The module page itself
+  // still re-checks access via requireAuth() on load, so a saved entry for
+  // a module the person no longer has access to just fails there safely,
+  // same as clicking a stale sidebar link would.
+  function restoreOpenModule(){
+    let saved = null;
+    try{ saved = JSON.parse(localStorage.getItem("rumbu_open_module") || "null"); }catch(e){}
+    if(!saved || !saved.dept || !saved.module) return;
+    openModule(null, saved.dept, saved.module, saved.label, saved.query);
   }
 
   // ---- Sidebar modules are rendered dynamically; ME holds the logged-in profile ----
@@ -435,6 +458,7 @@
       await renderSidebarModules(); // build the sidebar DOM before filtering it by branch
       await buildAccessMap();
       initDashboardLanding();
+      restoreOpenModule();
 
       document.body.classList.add("ready");
     }catch(e){

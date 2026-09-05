@@ -70,11 +70,11 @@
         <div class="sec-title">Production Entry</div>
         <div class="grid3">
           <div>
-            <label>Total Colored Flex (kg)</label>
+            <label>Total Colored Flex (kg) *</label>
             <input type="number" id="pfColoredFlex" step="0.01" oninput="computeProductionTotals()">
           </div>
           <div>
-            <label>Total Non-Colored Flex (kg)</label>
+            <label>Total Non-Colored Flex (kg) *</label>
             <input type="number" id="pfNonColoredFlex" step="0.01" oninput="computeProductionTotals()">
           </div>
           <div>
@@ -412,6 +412,17 @@ async function submitProd(){
     ["pfWasteAged","Waste — Aged Bottles (kg)"]
   ];
   for(const [id,label] of wasteFields){
+    if(document.getElementById(id).value===""){ st.style.color="var(--bad)"; st.textContent=`"${label}" is required (enter 0 if none).`; return; }
+  }
+
+  // Colored/Non-Colored Flex are mandatory — Total Production, and in turn
+  // Total Production + Waste, are both derived from them, so leaving either
+  // blank would make every downstream figure meaningless.
+  const productionFields = [
+    ["pfColoredFlex","Total Colored Flex (kg)"],
+    ["pfNonColoredFlex","Total Non-Colored Flex (kg)"]
+  ];
+  for(const [id,label] of productionFields){
     if(document.getElementById(id).value===""){ st.style.color="var(--bad)"; st.textContent=`"${label}" is required (enter 0 if none).`; return; }
   }
 

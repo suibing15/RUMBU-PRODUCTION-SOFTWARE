@@ -182,10 +182,14 @@
       </div>
       <div class="status" id="new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
       <div class="form-row">
-        <div class="field"><label>Branch</label>
-          <select id="new_emp_branch" onchange="onNewEmpBranchChange(); checkPossibleDuplicateEmployee('new_emp_full_name','new_emp_branch','new_emp_dup_warn');"><option value="">— none —</option></select>
+        <div class="field"><label>Email</label><input id="new_emp_email" type="email" placeholder="name@example.com"></div>
+        <div class="field"><label>Phone Number *</label><input id="new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Branch *</label>
+          <select id="new_emp_branch" onchange="onNewEmpBranchChange(); checkPossibleDuplicateEmployee('new_emp_full_name','new_emp_branch','new_emp_dup_warn');"><option value="">— select —</option></select>
         </div>
-        <div class="field"><label>Department</label>
+        <div class="field"><label>Department *</label>
           <select id="new_emp_department" onchange="onNewEmpDepartmentChange()" disabled><option value="">— select a Branch first —</option></select>
         </div>
         <div class="field"><label>Unit</label>
@@ -294,10 +298,14 @@
     </div>
     <div class="status" id="admin_new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
     <div class="form-row">
-      <div class="field"><label>Branch</label>
+      <div class="field"><label>Email</label><input id="admin_new_emp_email" type="email" placeholder="name@example.com"></div>
+      <div class="field"><label>Phone Number *</label><input id="admin_new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Branch *</label>
         <select id="admin_new_emp_branch" onchange="onNewEmpBranchChangeAdmin(); checkPossibleDuplicateEmployee('admin_new_emp_full_name','admin_new_emp_branch','admin_new_emp_dup_warn');"><option value="">— select —</option></select>
       </div>
-      <div class="field"><label>Department</label>
+      <div class="field"><label>Department *</label>
         <select id="admin_new_emp_department" onchange="onNewEmpDepartmentChangeAdmin()" disabled><option value="">— select a Branch first —</option></select>
       </div>
       <div class="field"><label>Unit</label>
@@ -408,6 +416,20 @@
 const EDGE_FUNCTION_URL = "https://betfhunzmhtdzgvufmfk.supabase.co/functions/v1/swift-handler";
 let ME = null;let ACCESS_TOKEN = null;
 let ALL_SECTIONS = [];
+let SECTION_DISPLAY_NAME = {}; // section.id -> friendly display label for the
+  // Sections & Pages ticklist specifically. The real branch names (ED1
+  // Office, KanoWash, etc.) read as confusing there right now since that
+  // list currently mixes in what look like duplicate/overlapping pages
+  // across branches — renamed to plain "Category N" (stable, based on
+  // ALL_SECTIONS' order) until the underlying duplicates are sorted out
+  // and the real names make sense to show again. Nowhere else in this file
+  // is affected — Employee Directory, Add Employee, etc. still show the
+  // real branch name.
+
+function buildSectionDisplayNames(){
+  SECTION_DISPLAY_NAME = {};
+  ALL_SECTIONS.forEach((s, i)=>{ SECTION_DISPLAY_NAME[s.id] = "Category " + (i+1); });
+}
 let DASHBOARD_PATHS = new Set();   // module_paths that are dashboards (from the dashboards registry)
 
 async function callEdgeFunction(payload){
@@ -453,6 +475,7 @@ async function init(){
 
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
+    buildSectionDisplayNames();
 
     // Determine which pages this manager is allowed to grant onward.
     await loadManagerAllowedPages();
@@ -603,6 +626,7 @@ async function renameBranch(id){
     await logActivity("branch_renamed", ME.username + " renamed a Branch to \"" + newName + "\"");
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
+    buildSectionDisplayNames();
     await loadBranchDeptTree();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
@@ -642,6 +666,7 @@ async function addBranch(){
     await logActivity("branch_added", ME.username + " added Branch \"" + name + "\"");
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
+    buildSectionDisplayNames();
     populateBranchModulesDropdown();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
@@ -923,6 +948,7 @@ async function deleteBranch(id, name){
     await logActivity("branch_deleted", ME.username + " deleted Branch \"" + name + "\"");
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
+    buildSectionDisplayNames();
     await loadBranchDeptTree();
   }catch(e){
     alert("❌ " + e.message + "\n\nThis Branch is likely still assigned to an account.");
@@ -1127,7 +1153,7 @@ async function renderSectionsWithPages(containerId, availableSectionIds, checked
   sections.forEach(s=>{
     const checked = checkedSectionIds.indexOf(s.id) !== -1 ? "checked" : "";
     html += `<div class="section-block">
-      <label><input type="checkbox" class="section-check" value="${s.id}" ${checked} onchange="toggleSectionPages(${s.id},'${containerId}')"> ${s.name}</label>
+      <label><input type="checkbox" class="section-check" value="${s.id}" ${checked} onchange="toggleSectionPages(${s.id},'${containerId}')"> ${SECTION_DISPLAY_NAME[s.id] || s.name}</label>
       <div id="secpages_${containerId}_${s.id}" class="${checked?'':'hidden'}"></div>
     </div>`;
   });
@@ -1167,7 +1193,7 @@ function renderSectionsOnly(containerId, checkedSectionIds){
   const container = document.getElementById(containerId);
   container.innerHTML = ALL_SECTIONS.map(s=>{
     const checked = checkedSectionIds.indexOf(s.id) !== -1 ? "checked" : "";
-    return `<label class="checks" style="display:inline-flex;"><input type="checkbox" class="admin-section-check" value="${s.id}" ${checked}> ${s.name}</label>`;
+    return `<label class="checks" style="display:inline-flex;"><input type="checkbox" class="admin-section-check" value="${s.id}" ${checked}> ${SECTION_DISPLAY_NAME[s.id] || s.name}</label>`;
   }).join(" ");
 }
 
@@ -1404,6 +1430,8 @@ async function addEmployee(){
   const status = document.getElementById("add_emp_status");
   const employeeId = document.getElementById("new_emp_employee_id").value.trim();
   const fullName   = document.getElementById("new_emp_full_name").value.trim();
+  const email      = document.getElementById("new_emp_email").value.trim();
+  const phone      = document.getElementById("new_emp_phone").value.trim();
   const branch     = document.getElementById("new_emp_branch").value || null;
   const deptSel    = document.getElementById("new_emp_department");
   const deptName   = deptSel.value ? deptSel.options[deptSel.selectedIndex].text : null;
@@ -1414,11 +1442,15 @@ async function addEmployee(){
 
   if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
   if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
+  if(!phone){ status.className="status err"; status.textContent="Phone Number is required."; return; }
+  if(email && !/^\S+@\S+\.\S+$/.test(email)){ status.className="status err"; status.textContent="Enter a valid email address, or leave it blank."; return; }
+  if(!branch){ status.className="status err"; status.textContent="Select a Branch."; return; }
+  if(!deptName){ status.className="status err"; status.textContent="Select a Department."; return; }
 
   status.className = "status"; status.textContent = "Adding...";
   try{
     const { data: inserted, error } = await sb.from("employees").insert({
-      employee_id: employeeId, full_name: fullName, branch, department: deptName, unit: unitName, rank
+      employee_id: employeeId, full_name: fullName, email: email||null, phone, branch, department: deptName, unit: unitName, rank
     }).select("id").single();
     if(error) throw error;
 
@@ -1431,7 +1463,7 @@ async function addEmployee(){
     await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
 
     document.getElementById("new_emp_dup_warn").style.display = "none";
-    ["new_emp_employee_id","new_emp_full_name","new_emp_rank","new_emp_salary"].forEach(id=>document.getElementById(id).value="");
+    ["new_emp_employee_id","new_emp_full_name","new_emp_email","new_emp_phone","new_emp_rank","new_emp_salary"].forEach(id=>document.getElementById(id).value="");
     document.getElementById("new_emp_branch").value = "";
     document.getElementById("new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
     document.getElementById("new_emp_department").disabled = true;
@@ -1451,6 +1483,8 @@ async function addEmployeeAsAdmin(){
   const status = document.getElementById("add_emp_status_admin");
   const employeeId = document.getElementById("admin_new_emp_employee_id").value.trim();
   const fullName   = document.getElementById("admin_new_emp_full_name").value.trim();
+  const email      = document.getElementById("admin_new_emp_email").value.trim();
+  const phone      = document.getElementById("admin_new_emp_phone").value.trim();
   const branch     = document.getElementById("admin_new_emp_branch").value;
   const deptSel    = document.getElementById("admin_new_emp_department");
   const deptName   = deptSel.value ? deptSel.options[deptSel.selectedIndex].text : null;
@@ -1460,15 +1494,18 @@ async function addEmployeeAsAdmin(){
 
   if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
   if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
+  if(!phone){ status.className="status err"; status.textContent="Phone Number is required."; return; }
+  if(email && !/^\S+@\S+\.\S+$/.test(email)){ status.className="status err"; status.textContent="Enter a valid email address, or leave it blank."; return; }
   if(!branch || !(ME.sectionNames||[]).includes(branch)){
     status.className="status err"; status.textContent="Select one of your assigned Branch(es).";
     return;
   }
+  if(!deptName){ status.className="status err"; status.textContent="Select a Department."; return; }
 
   status.className = "status"; status.textContent = "Adding...";
   try{
     const { error } = await sb.from("employees").insert({
-      employee_id: employeeId, full_name: fullName, branch, department: deptName, unit: unitName, rank
+      employee_id: employeeId, full_name: fullName, email: email||null, phone, branch, department: deptName, unit: unitName, rank
     });
     if(error) throw error;
 
@@ -1476,7 +1513,7 @@ async function addEmployeeAsAdmin(){
     await logActivity("employee_added", ME.username + " added employee \"" + fullName + "\" (" + employeeId + ")");
 
     document.getElementById("admin_new_emp_dup_warn").style.display = "none";
-    ["admin_new_emp_employee_id","admin_new_emp_full_name","admin_new_emp_rank"].forEach(id=>document.getElementById(id).value="");
+    ["admin_new_emp_employee_id","admin_new_emp_full_name","admin_new_emp_email","admin_new_emp_phone","admin_new_emp_rank"].forEach(id=>document.getElementById(id).value="");
     document.getElementById("admin_new_emp_department").innerHTML = '<option value="">— select a Branch first —</option>';
     document.getElementById("admin_new_emp_department").disabled = true;
     document.getElementById("admin_new_emp_unit").innerHTML = '<option value="">— none —</option>';
@@ -1853,7 +1890,9 @@ function renderRoleDropdown(){
   const q = searchEl ? searchEl.value.trim().toLowerCase() : "";
   const currentValue = sel.value;
 
-  const filtered = !q ? ROLE_ACCOUNTS : ROLE_ACCOUNTS.filter(r=>{
+  // Nothing shown at all until the admin actually types something — no more
+  // "browse everyone" list sitting there by default.
+  const filtered = !q ? [] : ROLE_ACCOUNTS.filter(r=>{
     const hay = (r.username + " " + r.role + " " + r.employee_id + " " + r.employee_name).toLowerCase();
     return hay.indexOf(q) !== -1;
   });
@@ -1866,7 +1905,9 @@ function renderRoleDropdown(){
   if(filtered.some(r=>r.id === currentValue)) sel.value = currentValue;
 
   if(resultsWrap){
-    if(!filtered.length){
+    if(!q){
+      resultsWrap.innerHTML = "";
+    } else if(!filtered.length){
       resultsWrap.innerHTML = "<p class='sub'>No matching accounts.</p>";
     } else {
       resultsWrap.innerHTML = filtered.map(r=>{

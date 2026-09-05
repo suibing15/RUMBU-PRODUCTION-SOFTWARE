@@ -53,7 +53,7 @@
         <select id="fStatus">
           <option value="">All</option>
           <option value="submitted">Submitted</option>
-          <option value="stage2_approval">QC Approval</option>
+          <option value="stage2_approval">Quality Control Approval</option>
           <option value="stage3p1_filling">Payment Phase 1 Fill</option>
           <option value="stage3p1_approval">Payment Phase 1 Approval</option>
           <option value="stage4_filling">Production Fill</option>
@@ -115,12 +115,12 @@
 let ME=null;
 
 const STATUS_LABELS={
-  submitted:'Awaiting QC Fill',
-  stage2_approval:'QC Approval Pending',
+  submitted:'Awaiting Quality Control Fill',
+  stage2_approval:'Quality Control Approval Pending',
   rejected_to_stage1:'Returned to Initiator',
   stage3p1_filling:'Payment Phase 1 Fill',
   stage3p1_approval:'Payment Phase 1 Approval',
-  rejected_to_stage2:'Returned to QC',
+  rejected_to_stage2:'Returned to Quality Control',
   stage4_filling:'Production Fill',
   stage4_approval:'Production Approval',
   rejected_to_stage3p1:'Returned to Payment Ph.1',
@@ -230,7 +230,7 @@ async function openDetail(id){
   }
   html+="</div>";
   if(qc){
-    html+=`<h4 style="color:var(--heading);margin:14px 0 6px;">Stage 2 — QC</h4><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:12px;">`;
+    html+=`<h4 style="color:var(--heading);margin:14px 0 6px;">Stage 2 — Quality Control</h4><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:12px;">`;
     html+=row("LOT",qc.offload_location)+row("Bales",qc.number_of_bales)+row("Grade",qc.bottle_grade)+row("Total Waste",qc.total_waste_record+" kg")+row("Accepted Waste",qc.accepted_waste+" kg")+row("Unacceptable",qc.unacceptable_waste_value+" kg")+row("Weight Diff",qc.weight_difference+" kg")+row("Raw Material",qc.raw_material_type)+row("Source",qc.material_source);
     html+="</div>";
   }
@@ -241,7 +241,7 @@ async function openDetail(id){
   }
   if(prod){
     html+=`<h4 style="color:var(--heading);margin:14px 0 6px;">Stage 4 — Production</h4><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:12px;">`;
-    html+=row("Start",prod.production_start?new Date(prod.production_start).toLocaleString("en-GB"):"—")+row("End",prod.production_end?new Date(prod.production_end).toLocaleString("en-GB"):"—")+row("Total Waste",prod.total_waste_kg+" kg")+row("Non-PET Waste",prod.waste_non_pet_kg+" kg")+row("Oily Waste",prod.waste_oily_kg+" kg")+row("Aged Waste",prod.waste_aged_kg+" kg")+row("Colour Bottles",prod.colour_bottles_kg+" kg")+row("LOT Freed","After approval");
+    html+=row("Start",prod.production_start?new Date(prod.production_start).toLocaleString("en-GB"):"—")+row("End",prod.production_end?new Date(prod.production_end).toLocaleString("en-GB"):"—")+row("Total Colored Flex",prod.colored_flex_kg+" kg")+row("Total Non-Colored Flex",prod.non_colored_flex_kg+" kg")+row("Total Production",prod.total_production_kg+" kg")+row("Total Waste",prod.total_waste_kg+" kg")+row("Non-PET Waste",prod.waste_non_pet_kg+" kg")+row("Oily Waste",prod.waste_oily_kg+" kg")+row("Aged Waste",prod.waste_aged_kg+" kg")+row("Total Production + Waste",prod.total_production_plus_waste_kg+" kg")+row("LOT Freed","After approval");
     html+="</div>";
   }
   document.getElementById("modalDetail").innerHTML=html;

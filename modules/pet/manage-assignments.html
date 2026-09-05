@@ -63,7 +63,7 @@
 </div>
 
 <script>
-let ME=null, ALL_USERS=[], CURRENT_STAGE='stage2';
+let ME=null, ALL_STAFF=[], CURRENT_STAGE='stage2', FILLER_IDS=new Set(), APPROVER_IDS=new Set();
 
 const STAGE_LABELS = {
   'stage2':   'Stage 2 — Quality Control',
@@ -77,12 +77,17 @@ async function init(){
   try{
     ME = await requireAuth("../../login.html");
     if(!ME) return;
-    const { data: sections, error: secErr } = await sb.from("app_sections").select("name").order("name");
+    // PET collection currently only happens at these two sites.
+    const { data: sections, error: secErr } = await sb.from("app_sections").select("name").in("name", ["LagosWash","KanoWash"]).order("name");
     if(secErr) throw new Error("Could not load branches: "+secErr.message);
     document.getElementById("sectionSel").innerHTML = (sections||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("")
       || `<option value="">No branches configured</option>`;
-    const { data: users } = await sb.from("profiles").select("id,username,full_name").order("full_name");
-    ALL_USERS = users||[];
+    // Fillers/approvers are picked from the real employee directory (global,
+    // shared with the rest of the system) rather than a raw account list —
+    // only employees who already have a linked login account can actually
+    // act as a filler/approver, so that's the pool we search.
+    const { data: staff } = await sb.from("employees").select("id,employee_id,full_name,branch,linked_profile_id").not("linked_profile_id","is",null).order("full_name");
+    ALL_STAFF = staff||[];
     await loadAll();
     cs.style.color="var(--ok)"; cs.textContent="Connected.";
   }catch(e){
@@ -105,57 +110,86 @@ async function loadAll(){
     sb.from("pet_stage_fillers").select("id,profile_id").eq("section",section).eq("stage",CURRENT_STAGE),
     sb.from("pet_stage_approvers").select("id,profile_id").eq("section",section).eq("stage",CURRENT_STAGE)
   ]);
+  FILLER_IDS = new Set((fillers||[]).map(f=>f.profile_id));
+  APPROVER_IDS = new Set((approvers||[]).map(a=>a.profile_id));
 
   const grid = document.getElementById("assignGrid");
   grid.innerHTML = `
     <div class="assign-card">
       <h4>Fillers <span style="font-weight:400;color:var(--muted);">(who fills this stage)</span></h4>
       <div id="fillerList">${renderPersonList(fillers||[], 'filler')}</div>
-      <div class="add-row">
-        <select id="fillerSel">${userOptions(fillers||[])}</select>
-        <button onclick="addAssignment('filler')">Add Filler</button>
-      </div>
+      ${pinSearchHtml('filler')}
     </div>
     <div class="assign-card">
       <h4>Approvers <span style="font-weight:400;color:var(--muted);">(ALL must approve)</span></h4>
       <div id="approverList">${renderPersonList(approvers||[], 'approver')}</div>
-      <div class="add-row">
-        <select id="approverSel">${userOptions(approvers||[])}</select>
-        <button onclick="addAssignment('approver')">Add Approver</button>
-      </div>
+      ${pinSearchHtml('approver')}
+    </div>`;
+}
+
+function pinSearchHtml(role){
+  return `
+    <div style="margin-top:10px;">
+      <label style="margin:0 0 4px;">Employee Code (PIN)</label>
+      <input type="text" id="${role}Pin" placeholder="Type employee code, e.g. RIG-0142"
+        oninput="searchStaffByPin('${role}', this.value)" onkeydown="if(event.key==='Enter') event.preventDefault();" autocomplete="off">
+      <div id="${role}PinResult" style="font-size:12.5px;margin-top:6px;min-height:18px;"></div>
     </div>`;
 }
 
 function renderPersonList(list, role){
   if(!list.length) return `<p style="font-size:12px;color:var(--muted);">None assigned.</p>`;
   return list.map(r=>{
-    const u = ALL_USERS.find(x=>x.id===r.profile_id);
+    const u = ALL_STAFF.find(x=>x.linked_profile_id===r.profile_id);
     return `<div class="person-row">
-      <span>${u?(u.full_name||u.username):r.profile_id}</span>
+      <span>${u?(u.full_name+" ("+u.employee_id+")"):("Profile #"+r.profile_id)}</span>
       <button class="rm-btn" onclick="removeAssignment(${r.id},'${role}')">Remove</button>
     </div>`;
   }).join("");
 }
 
-function userOptions(existing){
-  const usedIds = new Set(existing.map(e=>e.profile_id));
-  return '<option value="">Select user...</option>' +
-    ALL_USERS.filter(u=>!usedIds.has(u.id)).map(u=>`<option value="${u.id}">${u.full_name||u.username} (${u.username})</option>`).join("");
+// Type an Employee Code (PIN), see the match confirmed (scoped to the
+// currently selected Branch), then click Add. The box clears itself after
+// each successful add so the next PIN can be typed straight away — repeat
+// as many times as needed to add several people, one at a time.
+function searchStaffByPin(role, code){
+  const section = document.getElementById("sectionSel").value;
+  const resultEl = document.getElementById(role+"PinResult");
+  code = code.trim();
+  if(!code){ resultEl.innerHTML = ""; return; }
+
+  const match = ALL_STAFF.find(e => (e.employee_id||"").toLowerCase() === code.toLowerCase());
+  if(!match){
+    resultEl.innerHTML = `<span style="color:var(--bad);">No employee found with that code.</span>`;
+    return;
+  }
+  if(!section){
+    resultEl.innerHTML = `<span style="color:var(--bad);">Select a Branch first.</span>`;
+    return;
+  }
+  if(match.branch !== section){
+    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} belongs to ${match.branch||"no branch set"}, not ${section}.</span>`;
+    return;
+  }
+  const already = role==='filler' ? FILLER_IDS : APPROVER_IDS;
+  if(already.has(match.linked_profile_id)){
+    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} is already assigned as a ${role} here.</span>`;
+    return;
+  }
+  resultEl.innerHTML = `<span style="color:var(--ok);">${match.full_name} (${match.employee_id})</span>
+    <button onclick="confirmAddStaff('${role}', ${match.linked_profile_id})" style="margin-left:8px;padding:4px 12px;font-size:11px;">Add</button>`;
 }
 
-async function addAssignment(role){
+async function confirmAddStaff(role, profileId){
   const section = document.getElementById("sectionSel").value;
-  const selId = role==='filler' ? "fillerSel" : "approverSel";
-  const profileId = document.getElementById(selId).value;
   const st = document.getElementById("assignStatus");
-  if(!profileId){ st.style.color="var(--bad)"; st.textContent="Select a user first."; return; }
-
   const table = role==='filler' ? "pet_stage_fillers" : "pet_stage_approvers";
   const { error } = await sb.from(table).insert({ section, stage: CURRENT_STAGE, profile_id: profileId, assigned_by: ME.username });
   if(error){ st.style.color="var(--bad)"; st.textContent="Error: "+error.message; return; }
-  st.style.color="var(--ok)"; st.textContent="Assignment saved.";
+  st.style.color="var(--ok)"; st.textContent="Assignment saved. Enter the next code to keep adding.";
   await loadAll();
-  setTimeout(()=>{ st.textContent=""; }, 2000);
+  document.getElementById(role+"Pin")?.focus();
+  setTimeout(()=>{ st.textContent=""; }, 2500);
 }
 
 async function removeAssignment(id, role){

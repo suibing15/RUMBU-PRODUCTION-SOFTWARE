@@ -12,6 +12,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../auth.js"></script>
 <script src="review-modal.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   body{padding:20px;}
   .wrap{max-width:1000px;margin:0 auto;}
@@ -140,7 +142,10 @@
     </div>
     <div class="grid2" style="margin-top:6px;">
       <div><label>Agent</label><input type="text" id="prAgent" placeholder="Search by agent name or code" oninput="loadProductionReport()"></div>
-      <div style="display:flex;align-items:flex-end;"><button class="btn-ghost" onclick="clearProductionFilters()" style="width:100%;">Clear Filters</button></div>
+      <div style="display:flex;align-items:flex-end;gap:8px;">
+        <button class="btn-ghost" onclick="clearProductionFilters()" style="width:100%;">Clear Filters</button>
+        <button onclick="downloadProductionReportPdf()" style="width:100%;">⬇ Download PDF</button>
+      </div>
     </div>
     <div id="productionReportWrap" style="margin-top:14px;overflow-x:auto;"></div>
   </div>
@@ -151,7 +156,11 @@
 </div>
 
 <script>
-let ME=null, CURRENT_PROD=null, ALL_SECTIONS=[], PROD_QUEUE_DATA=[];
+let ME=null, CURRENT_PROD=null, ALL_SECTIONS=[], PROD_QUEUE_DATA=[], PROD_REPORT_ROWS=[];
+
+// PET collection currently only happens at these two sites — matches the
+// same restriction applied at Initiation.
+const ACTIVE_PET_BRANCHES = ["LagosWash", "KanoWash"];
 
 const NEXT_STATUS={stage4:'stage3p2_filling'};
 const REJECT_STATUS={stage4:'rejected_to_stage3p1'};
@@ -180,7 +189,7 @@ async function init(){
     if(!anyQ) document.getElementById("noQueue").style.display="block";
 
     const prSel = document.getElementById("prSection");
-    prSel.innerHTML = '<option value="">All</option>' + ALL_SECTIONS.map(s=>`<option value="${s}">${s}</option>`).join("");
+    prSel.innerHTML = '<option value="">All</option>' + ACTIVE_PET_BRANCHES.map(s=>`<option value="${s}">${s}</option>`).join("");
     await loadProductionReport();
 
     cs.style.color="var(--ok)"; cs.textContent="Connected.";
@@ -218,6 +227,7 @@ async function loadProductionReport(){
     if(agentQ && !((c.agent_name||"")+(c.agent_code||"")).toLowerCase().includes(agentQ)) return false;
     return true;
   });
+  PROD_REPORT_ROWS = rows;
 
   if(!rows.length){ wrap.innerHTML = `<p style="font-size:13px;color:var(--muted);">No production records match these filters.</p>`; return; }
 
@@ -244,6 +254,61 @@ async function loadProductionReport(){
       </tr>`;
     }).join("")}</tbody>
   </table>`;
+}
+
+function downloadProductionReportPdf(){
+  if(!PROD_REPORT_ROWS.length){ alert("Nothing to export — no records match the current filters."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const navy = [31, 56, 100]; // #1F3864 — Rumbu house style heading colour
+
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.rect(0, 0, doc.internal.pageSize.getWidth(), 56, "F");
+  doc.setTextColor(255,255,255);
+  doc.setFont("helvetica","bold"); doc.setFontSize(13);
+  doc.text("RUMBU INDUSTRIES GROUP", 30, 24);
+  doc.setFont("helvetica","normal"); doc.setFontSize(10);
+  doc.text("PET Collection — Production Report", 30, 40);
+  doc.text("Printed " + new Date().toLocaleString("en-GB"), doc.internal.pageSize.getWidth()-30, 24, { align: "right" });
+
+  doc.setTextColor(60,60,60); doc.setFontSize(9);
+  const from = document.getElementById("prFrom").value || "—";
+  const to = document.getElementById("prTo").value || "—";
+  const section = document.getElementById("prSection").value || "All";
+  const agent = document.getElementById("prAgent").value || "—";
+  doc.text(`Date range: ${from} to ${to}   |   Branch: ${section}   |   Agent: ${agent}   |   ${PROD_REPORT_ROWS.length} records`, 30, 72);
+
+  const body = PROD_REPORT_ROWS.map(r=>{
+    const c = r.pet_collections||{};
+    return [
+      c.form_number||"—",
+      (c.agent_name||"—") + (c.agent_code?" ("+c.agent_code+")":""),
+      c.section||"—",
+      r.production_start?new Date(r.production_start).toLocaleString("en-GB"):"—",
+      r.production_end?new Date(r.production_end).toLocaleString("en-GB"):"—",
+      r.colored_flex_kg||0, r.non_colored_flex_kg||0, r.total_production_kg||0,
+      r.total_waste_kg||0, r.total_production_plus_waste_kg||0
+    ];
+  });
+
+  doc.autoTable({
+    startY: 84,
+    head: [["Form #","Agent","Branch","Start","End","Colored Flex","Non-Colored Flex","Total Production","Total Waste","Production + Waste"]],
+    body,
+    styles: { fontSize: 7.5, cellPadding: 4 },
+    headStyles: { fillColor: navy, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [240, 244, 249] },
+    margin: { left: 30, right: 30 },
+    didDrawPage: function(){
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFontSize(8); doc.setTextColor(120,120,120);
+      doc.text("CONFIDENTIAL", 30, doc.internal.pageSize.getHeight()-16);
+      doc.text("Page " + doc.internal.getCurrentPageInfo().pageNumber + " of " + pageCount,
+        doc.internal.pageSize.getWidth()-30, doc.internal.pageSize.getHeight()-16, { align: "right" });
+    }
+  });
+
+  doc.save("PET_Production_Report_" + new Date().toISOString().slice(0,10) + ".pdf");
 }
 
 async function loadFillQueue(sections){

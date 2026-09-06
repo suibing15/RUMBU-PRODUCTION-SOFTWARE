@@ -31,8 +31,8 @@
   <h1>SOFTWARE NAME</h1>
   <p class="sub">RUMBU INDUSTRIES GROUP &bull; Sign in</p>
 
-  <label>Username</label>
-  <input type="text" id="username" autocomplete="username" onkeydown="if(event.key==='Enter'){document.getElementById('password').focus();}">
+  <label>Username or Email</label>
+  <input type="text" id="username" autocomplete="username" placeholder="Employee ID or email" onkeydown="if(event.key==='Enter'){document.getElementById('password').focus();}">
 
   <label>Password</label>
   <input type="password" id="password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){login();}">
@@ -53,7 +53,7 @@ async function login(){
   const btn = document.getElementById("loginBtn");
 
   if(!username || !password){
-    status.className = "status err"; status.textContent = "Enter your username and password.";
+    status.className = "status err"; status.textContent = "Enter your username or email and your password.";
     return;
   }
 
@@ -61,11 +61,20 @@ async function login(){
   status.className = "status"; status.textContent = "";
 
   try{
-    // Look up the real login email tied to this username. Super Admins
-    // use their own real email as their username too, so this works for
-    // everyone the same way.
-    const { data: email, error: rpcErr } = await sb.rpc("resolve_username_to_email", { p_username: username });
-    if(rpcErr || !email){
+    // Resolve what the person typed to their real Auth login email. A staff
+    // member's username is their Employee ID; Super Admins use their real
+    // email as their username. The RPC maps either to the login email.
+    let email = null;
+    try{
+      const { data } = await sb.rpc("resolve_username_to_email", { p_username: username });
+      if(data) email = data;
+    }catch(e){ /* fall through to the email fallback below */ }
+
+    // If it wasn't resolved but looks like an email, try it directly — this
+    // lets staff sign in with their own email once their account carries it.
+    if(!email && username.indexOf("@") !== -1) email = username;
+
+    if(!email){
       status.className = "status err"; status.textContent = "Invalid username or password.";
       return;
     }

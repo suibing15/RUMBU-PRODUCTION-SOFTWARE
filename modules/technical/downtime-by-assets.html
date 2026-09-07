@@ -29,7 +29,6 @@
   th{background:var(--navy);color:#fff;}
   tfoot td{font-weight:bold;background:#e3f2fd;}
   .green{background:#A5D6A7;} .red{background:#FFCDD2;}
-  .note{font-size:11px;color:#8a6d00;background:#fff8e1;border:1px dashed #d4a017;padding:6px;border-radius:6px;margin-top:10px;}
   @media print{ .no-print{display:none !important;} }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -47,7 +46,7 @@
 <label>Shed</label>
 <select id="shed">
   <option value="All">All</option>
-  <option value="i">1</option>
+  <option value="1">1</option>
   <option value="2">2</option>
   <option value="3">3</option>
   <option value="4">4</option>
@@ -55,7 +54,6 @@
   <option value="6">6</option>
   <option value="MamaSannu">MamaSannu</option>
 </select>
-<div class="note">Note: "1" is deliberately kept as value <code>i</code>, matching a likely typo in the original script's Shed dropdown. Tell me if you'd like it corrected to a real "1".</div>
 <button onclick="generate()">Generate Report</button>
 <button class="alt" onclick="window.print()">Print / Save as PDF</button>
 <div id="status">Connecting to Supabase...</div>
@@ -67,9 +65,68 @@
 function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }; }
 function parseDT(v){ const d=new Date(v); return isNaN(d)?null:d; }
 function minutesBetween(a,b){ return (!a||!b)?0:Math.trunc((b-a)/60000); }
-function extractNumber(v){ if(v==null) return 0; const m=String(v).match(/\d+(\.\d+)?/); return m?Number(m[0]):0; }
 
-let CTRL_ROWS = []; CTRL_ROWS.forEach(normalizeControlRow);
+// FIX 5: Normalised estimated-duration parser.
+// The BigQuery view stores Estimated_Minutes as a plain integer (minutes).
+// The Supabase column estimated_duration / extimated_time may arrive as a
+// plain number, a quoted number, or a string like "30 mins" / "0.5 hr".
+// We convert all forms to minutes so the column is always comparable to
+// the repair minutes calculated from timestamps.
+function parseEstimatedMinutes(v){
+  if(v == null || v === "") return 0;
+  const s = String(v).trim().toLowerCase();
+  // plain number — already in minutes
+  if(/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s));
+  // "X hr" / "X hrs" / "X hour(s)"
+  const hrMatch = s.match(/^([\d.]+)\s*hr/);
+  if(hrMatch) return Math.round(Number(hrMatch[1]) * 60);
+  // "X min" / "X mins" / "X minute(s)"
+  const minMatch = s.match(/^([\d.]+)\s*min/);
+  if(minMatch) return Math.round(Number(minMatch[1]));
+  // fallback: strip non-numeric and treat as minutes
+  const bare = s.match(/[\d.]+/);
+  return bare ? Math.round(Number(bare[0])) : 0;
+}
+
+// FIX 1: Planned / non-productive downtime codes to exclude.
+// Mirrors the BigQuery view v_unplanned_downtime and every other report in this
+// codebase (summary-report, grand-total-report) by fetching the live `job_table`
+// from Supabase and excluding any control row whose job_code is in that table.
+// The planned codes (BREAK, PRAYER, TOILET, LEAVE, EX, OPR, etc.) are stored
+// in the `job_code` column of the control table — NOT in the description field.
+let EXCLUDED_JOB_CODES = new Set();
+
+let CTRL_ROWS = [];
+
+function normalizeControlRow(r){
+  if(r.date_col === undefined) r.date_col = r.date;
+  if(r.names === undefined) r.names = r.nurse_name;
+  if(r.stop_time === undefined) r.stop_time = r.mc_stoppage_time;
+  if(r.extimated_time === undefined) r.extimated_time = r.estimated_duration;
+  if(r.discription === undefined) r.discription = r.description;
+  return r;
+}
+
+// FIX 2: Operational-day date derivation.
+// The BigQuery view uses Event_Date — the operational shift day — rather than
+// the raw mc_stoppage_time timestamp. For night shifts that cross midnight,
+// mc_stoppage_time may fall on the next calendar day, while Event_Date keeps
+// the record on the day the shift started. We replicate that logic here:
+// if the stoppage is before 06:00 local time we attribute it to the previous
+// calendar day (i.e. the night shift that started the evening before).
+function operationalDate(r){
+  const raw = r.stop_time || r.date_col;
+  if(!raw) return null;
+  const d = new Date(raw);
+  if(isNaN(d)) return null;
+  // Night-shift boundary: anything before 06:00 belongs to the previous day
+  if(d.getHours() < 6){
+    const prev = new Date(d);
+    prev.setDate(prev.getDate() - 1);
+    return prev.toISOString().slice(0,10);
+  }
+  return d.toISOString().slice(0,10);
+}
 
 const DEPARTMENTS = {
   "FEEDING": ["200","201A","201B","202A","202B","203A","203B","204A","204B","205A","205B","206A","206B","207","208","209","210A","210B","211","212A","212B","214A","214B","215A","215B","216A","216B","218A","218B","220A","220B","222A","222B","223A","223B","224A","224B","225A","225B","226A","226B","227A","227B","228","230A","230B","231","232","233","234","235","236","237A","237B","237C","237D","238","239A","239B","239C","240A","240B","241A","241B","242A","242B","243","244A","245","248","249","251","252","253A","253B","254A","254B","255","256A","256B","257A","257B","258A","258B","260A","260B","261A","261B","262","263A","263B","264A","264B","265","266","267A","267B","268","270","271A","271B","272A","272B","273A","273B","274A","274B","275","277","278","279","280","281A","281B","282A","282B","283A","283B","284","285A","285B","286","287","288","289A","289B","290A","290B","291A","291B","292A","292B","293","294","295","296A","296B","297","298"],
@@ -92,20 +149,20 @@ function getJobCodesByDepartment(department){
   return DEPARTMENTS[department] || [];
 }
 
-
-async function fetchAllControlRows(){
-  const pageSize=1000; let all=[], offset=0;
-  while(true){
-    const res = await fetch(SUPABASE_URL + "/rest/v1/control?select=*&limit="+pageSize+"&offset="+offset, { headers: authHeaders() });
-    if(!res.ok) throw new Error("HTTP " + res.status);
-    const page = await res.json();
-    all = all.concat(page);
-    if(page.length < pageSize) break;
+async function fetchAllRows(table, select, query){
+  let all = [], offset = 0; const pageSize = 1000;
+  const q = query || "";
+  for(let guard=0; guard<500; guard++){
+    const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset + "-" + (offset+pageSize-1) });
+    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q, { headers });
+    if(!res.ok) throw new Error(table + ": HTTP " + res.status);
+    const batch = await res.json();
+    all = all.concat(batch);
+    if(batch.length < pageSize) break;
     offset += pageSize;
   }
   return all;
 }
-
 
 function normalizeControlRow(r){
   if(r.date_col === undefined) r.date_col = r.date;
@@ -122,8 +179,6 @@ async function init(){
     const me = await requireAuth("../../login.html");
     if(!me) return;
 
-    // Populate from known department column values — matches old AppScript's
-    // SELECT DISTINCT Department FROM maintenance_log
     const KNOWN_DEPARTMENTS = [
       "BEAMING","DELIVERY","DESIGN CARD","ELEC EXTRUDER","ELEC MAT WEAVING",
       "ELECRICAL RECYCLING","ELECTRICAL TWINE","EXT-MECH CUTTER","EXT-MECH DIE HEAD",
@@ -146,33 +201,45 @@ async function init(){
 }
 
 async function fetchRangeControl(fromDate, toDate){
-  // Use mc_stoppage_time — matches old script's DATE(MC_Stoppage_Time) BETWEEN
-  CTRL_ROWS = await fetchAllRows("control","*", "&mc_stoppage_time=gte."+fromDate+"&mc_stoppage_time=lte."+toDate+"T23:59:59");
-  CTRL_ROWS.forEach(normalizeControlRow);
-}
+  // FIX 2: Widen the fetch window by one day on each side to capture night-shift
+  // records whose mc_stoppage_time timestamp crosses midnight. The operational-day
+  // logic in operationalDate() then assigns them to the correct shift day.
+  const from = new Date(fromDate); from.setDate(from.getDate() - 1);
+  const to   = new Date(toDate);   to.setDate(to.getDate()   + 1);
+  const fromISO = from.toISOString().slice(0,10);
+  const toISO   = to.toISOString().slice(0,10);
 
-async function fetchAllRows(table, select, query){
-  let all = [], offset = 0; const pageSize = 1000;
-  const q = query || "";
-  for(let guard=0; guard<500; guard++){
-    const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset + "-" + (offset+pageSize-1) });
-    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q, { headers });
-    if(!res.ok) throw new Error(table + ": HTTP " + res.status);
-    const batch = await res.json();
-    all = all.concat(batch);
-    if(batch.length < pageSize) break;
-    offset += pageSize;
+  // FIX 1: Fetch job_table exclusion list in parallel with control rows.
+  // This matches exactly how summary-report.html and grand-total-report.html
+  // exclude planned codes — by job_code column, not by description text.
+  const [ctrlRows, jobRes] = await Promise.all([
+    fetchAllRows(
+      "control", "*",
+      "&mc_stoppage_time=gte." + fromISO + "&mc_stoppage_time=lte." + toISO + "T23:59:59"
+    ),
+    fetch(SUPABASE_URL + "/rest/v1/job_table?select=job_code", { headers: authHeaders() })
+  ]);
+
+  if(jobRes.ok){
+    const jobRows = await jobRes.json();
+    EXCLUDED_JOB_CODES = new Set(jobRows.map(r => r.job_code));
+  } else {
+    // Non-fatal: if job_table fetch fails, fall back to hardcoded known codes
+    EXCLUDED_JOB_CODES = new Set(["BREAK","PRAYER","TOILET","LEAVE","EX","OPR"]);
+    console.warn("job_table fetch failed, using fallback exclusion list");
   }
-  return all;
+
+  CTRL_ROWS = ctrlRows;
+  CTRL_ROWS.forEach(normalizeControlRow);
 }
 
 async function generate(){
   const startDate = document.getElementById("startDate").value;
-  const endDate = document.getElementById("endDate").value;
+  const endDate   = document.getElementById("endDate").value;
   const department = document.getElementById("department").value;
-  const shift = document.getElementById("shift").value;
-  const section = document.getElementById("section").value;
-  const shed = document.getElementById("shed").value;
+  const shift      = document.getElementById("shift").value;
+  const section    = document.getElementById("section").value;
+  const shed       = document.getElementById("shed").value;
   if(!startDate || !endDate){ alert("⚠️ Please select both Start and End dates."); return; }
 
   const status = document.getElementById("status");
@@ -186,21 +253,36 @@ async function generate(){
   if(!CTRL_ROWS.length){ document.getElementById("reportArea").innerHTML = "<p>No records found for this date range.</p>"; return; }
 
   const rows = CTRL_ROWS.filter(r=>{
-    // Date: derive from mc_stoppage_time — matches old script's DATE(MC_Stoppage_Time) BETWEEN
-    const stopDate = r.stop_time ? r.stop_time.slice(0,10) : r.date_col;
-    if(stopDate < startDate || stopDate > endDate) return false;
-    // Department: use actual department COLUMN — matches old script's AND Department=@dept
-    // Do NOT use job-code mapping; that pulls in records from other departments.
+
+    // FIX 1: Exclude planned / non-productive job codes via job_table.
+    // job_code is the column that stores BREAK, PRAYER, TOILET, LEAVE, EX, OPR
+    // etc. in the control table. Matches summary-report and grand-total-report.
+    if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
+
+    // FIX 2: Use operational-day date (night-shift boundary at 06:00).
+    // Mirrors the BigQuery view's Event_Date column.
+    const opDate = operationalDate(r);
+    if(!opDate || opDate < startDate || opDate > endDate) return false;
+
+    // Department filter: match the actual department column value.
     if(department !== "All" && (r.department||"").trim() !== department) return false;
+
     if(shift !== "All" && r.shift !== shift) return false;
-    // Section: LIKE logic matches old script behaviour
+
+    // FIX 3: Section filter with extruder-section normalisation.
+    // The BigQuery view folds all extruder-area sections into "Rumbu".
+    // Any section that is not MamaSannu is treated as Rumbu here.
     if(section !== "All"){
       const sec = (r.section||"").toUpperCase().trim();
-      if(section === "MamaSannu" && !sec.includes("MAMASANNU")) return false;
-      if(section === "Rumbu" && sec.includes("MAMASANNU")) return false;
-      if(section !== "MamaSannu" && section !== "Rumbu" && sec !== section.toUpperCase()) return false;
+      const isMama = sec.includes("MAMASANNU");
+      if(section === "MamaSannu" && !isMama) return false;
+      if(section === "Rumbu"     &&  isMama) return false;
+      // All extruder / Rumbu-area sub-sections are included when section = "Rumbu"
     }
+
+    // FIX 4: Shed "1" value corrected from "i" to "1".
     if(shed !== "All" && String(r.shed) !== shed) return false;
+
     return true;
   });
 
@@ -214,23 +296,34 @@ async function generate(){
     const a = r.assets || "(blank)";
     if(!byAsset[a]) byAsset[a] = { asset:a, count:0, downtime:0, repair:0, est:0 };
     byAsset[a].count++;
-    byAsset[a].downtime += minutesBetween(parseDT(r.stop_time), parseDT(r.finish_time));
-    byAsset[a].repair += minutesBetween(parseDT(r.starting_time), parseDT(r.finish_time));
-    byAsset[a].est += extractNumber(r.extimated_time);
+    byAsset[a].downtime += minutesBetween(parseDT(r.stop_time),     parseDT(r.finish_time));
+    byAsset[a].repair   += minutesBetween(parseDT(r.starting_time), parseDT(r.finish_time));
+    // FIX 5: Normalised estimated-duration conversion (always produces minutes).
+    byAsset[a].est += parseEstimatedMinutes(r.extimated_time);
   });
+
+  // Totals row
+  let totCount=0, totDowntime=0, totRepair=0, totEst=0;
 
   let html = `<h2 style="text-align:center;color:var(--heading);">📊 Downtime by Assets Report</h2>
     <p style="text-align:center;">${startDate} &rarr; ${endDate} | Department: ${department} | Shift: ${shift} | Section: ${section} | Shed: ${shed}</p>
-    <table><thead><tr><th>Asset</th><th>Occurrences</th><th>Downtime</th><th>Repair</th><th>Est Duration</th><th>Diff</th></tr></thead><tbody>`;
+    <table><thead><tr><th>Asset</th><th>Occurrences</th><th>Downtime (min)</th><th>Repair (min)</th><th>Est Duration (min)</th><th>Diff</th></tr></thead><tbody>`;
 
   Object.values(byAsset).sort((a,b)=>b.count-a.count).forEach(r=>{
     const downtime=Math.round(r.downtime), repair=Math.round(r.repair), est=Math.round(r.est);
     const diff = est - repair;
+    totCount+=r.count; totDowntime+=downtime; totRepair+=repair; totEst+=est;
     html += `<tr><td>${r.asset}</td><td>${r.count}</td><td>${downtime}</td><td>${repair}</td><td>${est}</td>` +
       `<td class="${diff>0?'green':'red'}">${diff}</td></tr>`;
   });
-  html += "</tbody></table>";
+
+  const totDiff = totEst - totRepair;
+  html += `</tbody><tfoot><tr><td>TOTAL</td><td>${totCount}</td><td>${totDowntime}</td><td>${totRepair}</td><td>${totEst}</td>` +
+    `<td class="${totDiff>0?'green':'red'}">${totDiff}</td></tr></tfoot></table>`;
+
   document.getElementById("reportArea").innerHTML = html;
+  status.style.color="#1d8a4e";
+  status.textContent = `Report generated — ${rows.length} unplanned records across ${Object.keys(byAsset).length} assets.`;
 }
 
 init();

@@ -27,6 +27,19 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="auth.js"></script>
+<style>
+  /* Auth gate — hide the dashboard until the session is confirmed, so it
+     never flashes on screen before redirecting to login. */
+  #authGate{
+    position:fixed; inset:0; z-index:99999;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--muted);
+    font-size:14px; font-weight:600; text-align:center; padding:20px;
+  }
+  #authGate.err{ color:var(--bad); }
+  body.ready #authGate{ display:none; }
+  body:not(.ready) > *:not(#authGate){ visibility:hidden !important; }
+</style>
 </head>
 <body>
 

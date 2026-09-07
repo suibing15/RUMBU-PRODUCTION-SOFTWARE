@@ -1335,96 +1335,8 @@ async function renderPagesPicker(containerId, checkedPageIds, sectionId){
 }
 
 // =========================================================
-// PAGES-BY-MODULE PICKER (used by Manage Role for both Admin and User
-// targets) — pages are grouped directly by their real Module (folder),
-// with no Section/Category tick step in between. Which pages are
-// *available to grant* is governed by MANAGER_ALLOWED_PAGE_IDS only
-// (an Admin can only ever grant pages they themselves hold) — Section
-// was never itself a live permission boundary here, just an extra
-// nesting step, so removing it changes nothing about what anyone can
-// actually be granted.
-// =========================================================
-async function renderPagesByModuleOnly(containerId, checkedPageIds){
-  const container = document.getElementById(containerId);
-  const { data, error } = await sb.from("pages").select("id, name, module_path, module_id, modules(name)").order("name");
-  if(error){ container.innerHTML = "Error: " + error.message; return; }
-  if(!data || !data.length){ container.innerHTML = "<p class='sub'>No pages exist yet.</p>"; return; }
-
-  const byModule = {};
-  data.forEach(p=>{
-    if(MANAGER_ALLOWED_PAGE_IDS && !MANAGER_ALLOWED_PAGE_IDS.has(p.id)) return;
-    const modName = p.modules ? p.modules.name : "(Unassigned)";
-    if(!byModule[modName]) byModule[modName] = [];
-    byModule[modName].push(p);
-  });
-
-  if(!Object.keys(byModule).length){ container.innerHTML = "<p class='sub'>You have no pages you can grant onward.</p>"; return; }
-
-  // Dashboards group first, same convention as before.
-  const dashItems = [];
-  Object.keys(byModule).forEach(mod=>{
-    byModule[mod] = byModule[mod].filter(p=>{
-      if(DASHBOARD_PATHS.has(p.module_path)){ dashItems.push(p); return false; }
-      return true;
-    });
-    if(!byModule[mod].length) delete byModule[mod];
-  });
-
-  let html = "";
-  if(dashItems.length){
-    dashItems.sort((a,b)=>a.name.localeCompare(b.name));
-    const anyChecked = dashItems.some(p=>checkedPageIds.indexOf(p.id) !== -1);
-    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">📊 Dashboards</summary><div class="checks">`;
-    dashItems.forEach(p=>{
-      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
-      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
-    });
-    html += "</div></details>";
-  }
-
-  Object.keys(byModule).sort().forEach(modName=>{
-    const pagesInMod = byModule[modName].sort((a,b)=>a.name.localeCompare(b.name));
-    const anyChecked = pagesInMod.some(p=>checkedPageIds.indexOf(p.id) !== -1);
-    html += `<details class="page-group" ${anyChecked?"open":""}><summary class="page-group-title">${modName}</summary><div class="checks">`;
-    pagesInMod.forEach(p=>{
-      const checked = checkedPageIds.indexOf(p.id) !== -1 ? "checked" : "";
-      html += `<label><input type="checkbox" class="page-check" value="${p.id}" ${checked}> ${p.name}</label>`;
-    });
-    html += "</div></details>";
-  });
-  container.innerHTML = html;
-}
-
-function getCheckedPagesOnly(containerId){
-  return Array.from(document.querySelectorAll("#" + containerId + " .page-check:checked")).map(el=>Number(el.value));
-}
-
-// =========================================================
-// PLAIN BRANCH PICKER — a simple checklist, unrelated to which pages are
-// shown. This is what actually writes to profile_sections (the real,
-// live branch-scoping used throughout PET etc.) — kept fully separate
-// from the Pages picker above now that Pages no longer nests under it.
-// =========================================================
-function renderPlainBranchPicker(containerId, availableSectionIds, checkedSectionIds){
-  const container = document.getElementById(containerId);
-  const sections = ALL_SECTIONS.filter(s => availableSectionIds.indexOf(s.id) !== -1);
-  if(!sections.length){ container.innerHTML = "<p class='sub'>No Branches available yet.</p>"; return; }
-  container.innerHTML = sections.map(s=>{
-    const checked = checkedSectionIds.indexOf(s.id) !== -1 ? "checked" : "";
-    return `<label class="checks" style="display:inline-flex;"><input type="checkbox" class="plain-branch-check" value="${s.id}" ${checked}> ${SECTION_DISPLAY_NAME[s.id] || s.name}</label>`;
-  }).join(" ");
-}
-
-function getCheckedPlainBranches(containerId){
-  return Array.from(document.querySelectorAll("#" + containerId + " .plain-branch-check:checked")).map(el=>Number(el.value));
-}
-
-// =========================================================
-// SECTIONS + PAGES PICKER (legacy — no longer called anywhere in this
-// file; superseded by renderPagesByModuleOnly + renderPlainBranchPicker
-// above, which separate "which Branches" from "which Pages" instead of
-// nesting one under the other). Left in place only in case anything
-// external still references it; safe to delete once confirmed unused.
+// SECTIONS + PAGES PICKER (used by Create User and Manage Role for a User
+// target) — tick a Section, then its pages appear nested underneath.
 // =========================================================
 async function renderSectionsWithPages(containerId, availableSectionIds, checkedSectionIds, checkedPageIds){
   const container = document.getElementById(containerId);
@@ -2038,6 +1950,16 @@ function openEmployeeDetail(empId){
         "<button style=\"margin:0;padding:8px 12px;\" onclick=\"changeEmployeeRole(" + e.id + ",'" + e.linked_profile_id + "','" + e.linked_role + "')\">Change Role</button>";
     } else {
       html += "<p class=\"sub\" style=\"margin:0;\">This account already has access" + (isAdmin ? " (role changes are a Super Admin action)." : ".") + "</p>";
+    }
+    // Reset password — for when a staff member forgets theirs. Resets to the
+    // temporary password and forces a change on next login. Not offered for
+    // Super Admin accounts (protected server-side too).
+    if(e.linked_profile_id && e.linked_role !== "super_admin"){
+      html += "<div style=\"margin-top:12px;padding-top:12px;border-top:1px solid var(--line);\">" +
+        "<label>Forgot their password?</label>" +
+        "<button style=\"margin:0;padding:8px 12px;\" onclick=\"resetAccessPassword(" + e.id + ")\">Reset Password</button>" +
+        "<div class=\"sub\" style=\"margin-top:6px;\">Sets it to the temporary password <b>" + TEMP_ACCESS_PASSWORD + "</b>; they must change it on next login.</div>" +
+      "</div>";
     }
   } else {
     // Granting creates the login account directly: username = Employee ID,
@@ -3276,10 +3198,8 @@ async function openRolePanelForProfile(id){
     panel.innerHTML = `
       <p class="sub" style="margin-top:0;">Managing <b>${esc(profile.username)}</b> — role: <b>${esc(profile.role)}</b></p>
       <label>Username</label><input id="role_username" value="${esc(profile.username)}">
-      <label>Branches (which Branches this Admin is scoped to)</label>
-      <div id="role_branches"></div>
-      <label style="margin-top:14px;">Pages (tick the exact modules and pages this Admin may use)</label>
-      <div id="role_pages"></div>
+      <label>Sections &amp; Pages (tick the Branches, then the exact modules this Admin may use)</label>
+      <div id="role_sections_pages"></div>
       <button onclick="saveRoleDetails('${id}','admin')">SAVE DETAILS</button>
 
       <div class="grid" style="margin-top:16px;">
@@ -3291,8 +3211,7 @@ async function openRolePanelForProfile(id){
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>
     `;
-    renderPlainBranchPicker("role_branches", availableSectionIds, assignedSectionIds);
-    await renderPagesByModuleOnly("role_pages", assignedPageIds);
+    await renderSectionsWithPages("role_sections_pages", availableSectionIds, assignedSectionIds, assignedPageIds);
   } else {
     const { data: ap } = await sb.from("assigned_pages").select("page_id").eq("profile_id", id);
     const assignedPageIds = (ap||[]).map(r=>r.page_id);
@@ -3301,10 +3220,8 @@ async function openRolePanelForProfile(id){
     panel.innerHTML = `
       <p class="sub" style="margin-top:0;">Managing <b>${esc(profile.username)}</b> — role: <b>${esc(profile.role)}</b></p>
       <label>Username</label><input id="role_username" value="${esc(profile.username)}">
-      <label>Branches (which Branches this account is scoped to)</label>
-      <div id="role_branches"></div>
-      <label style="margin-top:14px;">Pages (tick the exact modules and pages this account may use)</label>
-      <div id="role_pages"></div>
+      <label>Sections &amp; Pages</label>
+      <div id="role_sections_pages"></div>
       <button onclick="saveRoleDetails('${id}','user')">SAVE DETAILS</button>
 
       <div class="grid" style="margin-top:16px;">
@@ -3316,8 +3233,7 @@ async function openRolePanelForProfile(id){
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>
     `;
-    renderPlainBranchPicker("role_branches", availableSectionIds, assignedSectionIds);
-    await renderPagesByModuleOnly("role_pages", assignedPageIds);
+    await renderSectionsWithPages("role_sections_pages", availableSectionIds, assignedSectionIds, assignedPageIds);
   }
   panel.classList.remove("hidden");
   if(panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -3341,8 +3257,7 @@ async function saveRoleDetails(id, role){
     if(uErr) throw uErr;
 
     if(role === "admin"){
-      const sectionIds = getCheckedPlainBranches("role_branches");
-      const pageIds = getCheckedPagesOnly("role_pages");
+      const { sectionIds, pageIds } = getCheckedSectionsAndPages("role_sections_pages");
       const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
       if(delSecErr) throw delSecErr;
       if(sectionIds.length){
@@ -3358,8 +3273,7 @@ async function saveRoleDetails(id, role){
         if(insPageErr) throw insPageErr;
       }
     } else {
-      const sectionIds = getCheckedPlainBranches("role_branches");
-      const pageIds = getCheckedPagesOnly("role_pages");
+      const { sectionIds, pageIds } = getCheckedSectionsAndPages("role_sections_pages");
       const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
       if(delSecErr) throw delSecErr;
       if(sectionIds.length){

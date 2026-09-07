@@ -15,8 +15,10 @@
 <style>
   :root{--navy:var(--heading);}
   *{box-sizing:border-box;}
-  body{font-family:var(--sans);background:var(--bg);display:flex;justify-content:center;padding:15px;margin:0;}
+  body{font-family:var(--sans);background:var(--bg);display:flex;flex-direction:column;align-items:center;padding:15px;margin:0;}
   .box{background:var(--card);padding:20px;border-radius:10px;width:100%;max-width:520px;box-shadow:0 4px 10px rgba(0,0,0,.15);}
+  #reportArea{width:100%;max-width:900px;margin-top:20px;}
+  #reportArea .report-card{background:var(--card);padding:20px;border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,.15);overflow-x:auto;}
   h2{text-align:center;color:var(--navy);}
   label{font-weight:bold;margin-top:10px;display:block;}
   select,input,button{width:100%;padding:10px;margin-top:5px;border-radius:6px;border:1px solid var(--line);}
@@ -218,28 +220,37 @@ async function generate(){
   const status = document.getElementById("status");
   status.style.color=""; status.textContent = "Loading…";
   try{
-    // Use mc_stoppage_time filter to match old script's DATE(MC_Stoppage_Time) BETWEEN
-    CTRL_ROWS = await fetchAllRows("control","*", "&mc_stoppage_time=gte."+startDate+"&mc_stoppage_time=lte."+endDate+"T23:59:59");
+    // FIX 2: Filter on date_col (operator-recorded date) — consistent with all other reports.
+    // GAS uses DATE(MC_Stoppage_Time) BETWEEN which is equivalent to the stored date field.
+    CTRL_ROWS = await fetchAllRows("control","*", "&date=gte."+startDate+"&date=lte."+endDate);
     CTRL_ROWS.forEach(normalizeControlRow);
   }catch(e){
     status.style.color="#c0392b"; status.textContent = "Could not read data: " + (e.message||e); return;
   }
   status.textContent = "";
 
-  const jobSet = department === "All" ? null : new Set(getJobCodesByDepartment(department));
+  // FIX 3: GAS does NOT filter by department via job_code mapping for this report.
+  // The department dropdown in GAS populates from BigQuery but is never used as
+  // a SQL WHERE clause (except Department='Technical' when role='Nurses').
+  // Vercel was incorrectly filtering by job_code asset lists — this excluded all
+  // nurse records when any department other than "All" was selected.
+  // Removed the jobSet/job_code department filter entirely.
   const rows = CTRL_ROWS.filter(r=>{
-    // Use date from mc_stoppage_time (matches old script's DATE(MC_Stoppage_Time) BETWEEN)
-    const stopDate = r.stop_time ? r.stop_time.slice(0,10) : r.date_col;
-    if(stopDate < startDate || stopDate > endDate) return false;
+    // FIX 2: Use date_col (operator-recorded date).
+    const recDate = r.date_col || null;
+    if(!recDate || recDate < startDate || recDate > endDate) return false;
+    // Exclude planned job codes (same LEFT JOIN logic as GAS).
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
-    if(jobSet && !jobSet.has(r.job_code)) return false;
     if(shift !== "All" && r.shift !== shift) return false;
-    if(section !== "All" && r.section !== section) return false;
-    // UNRESOLVED: "Technical" is not one of the 14 departments in the reliable
-    // job-code map, so this condition still relies on the unreliable
-    // department column and will rarely match. Flagged for a follow-up fix
-    // once we know how Technical/Nurse rows are truly identified.
-    if(role === "Nurses" && r.department !== "Technical") return false;
+    // FIX 4: Section filter with case/whitespace tolerance (matches GAS AND Section=@sc).
+    if(section !== "All"){
+      const rSec = (r.section||"").toUpperCase().trim();
+      const fSec = section.toUpperCase().trim();
+      if(rSec !== fSec) return false;
+    }
+    // FIX 3: Department filter — GAS only applies Department='Technical' for nurse mode.
+    // No other department column filtering is done for this report.
+    if(role === "Nurses" && (r.department||"").trim() !== "Technical") return false;
     return true;
   });
 
@@ -266,12 +277,12 @@ async function generate(){
   }
 
   const totalAmount = nurseData.reduce((a,b)=>a+b.amt,0);
-  let html = `<div class="box"><h2>Nurse Evaluation Report</h2><table>
+  let html = `<div class="report-card"><h2 style="text-align:center;color:var(--navy);">Nurse Evaluation Report</h2><table>
     <tr><th>Nurse</th><th>Frequency</th><th>Repair (min)</th><th>Estimated (min)</th><th>Efficiency (%)</th><th>Amount (₦)</th></tr>`;
   nurseData.forEach(nd=>{
     html += `<tr><td>${nd.nurse}</td><td>${nd.freq}</td><td>${nd.repair}</td><td>${nd.est}</td><td>${nd.efficiency}</td><td>${nd.amt}</td></tr>`;
   });
-  html += `<tr style="font-weight:bold"><td colspan="5">Total Amount</td><td>${totalAmount}</td></tr></table></div>`;
+  html += `<tr style="font-weight:bold;background:var(--bg);"><td colspan="5">Total Amount</td><td>${totalAmount}</td></tr></table></div>`;
   document.getElementById("reportArea").innerHTML = html;
 }
 

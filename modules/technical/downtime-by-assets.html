@@ -89,24 +89,12 @@ function parseEstimatedMinutes(v){
 }
 
 // FIX 1: Planned / non-productive downtime codes to exclude.
-// Mirrors the BigQuery view v_unplanned_downtime which strips these codes
-// before aggregation: BREAK, PRAYER, TOILET, LEAVE (operator-side) and
-// EX, OPR (non-productive electrical codes).
-const PLANNED_CODES = new Set(["BREAK","PRAYER","TOILET","LEAVE","EX","OPR"]);
-
-function isPlannedRow(r){
-  // Check the description / repair_code field — the view excludes rows whose
-  // Description starts with or equals one of the planned codes.
-  const desc = (r.discription || r.description || "").toUpperCase().trim();
-  // Match whole-word at start (e.g. "BREAK" or "BREAK - ..." but not "BREAKDOWN")
-  for(const code of PLANNED_CODES){
-    if(desc === code || desc.startsWith(code + " ") || desc.startsWith(code + "-")) return true;
-  }
-  // Also check a dedicated repair_code / job_code column if present
-  const code = (r.repair_code || r.job_code || "").toUpperCase().trim();
-  if(PLANNED_CODES.has(code)) return true;
-  return false;
-}
+// Mirrors the BigQuery view v_unplanned_downtime and every other report in this
+// codebase (summary-report, grand-total-report) by fetching the live `job_table`
+// from Supabase and excluding any control row whose job_code is in that table.
+// The planned codes (BREAK, PRAYER, TOILET, LEAVE, EX, OPR, etc.) are stored
+// in the `job_code` column of the control table — NOT in the description field.
+let EXCLUDED_JOB_CODES = new Set();
 
 let CTRL_ROWS = [];
 
@@ -221,10 +209,27 @@ async function fetchRangeControl(fromDate, toDate){
   const fromISO = from.toISOString().slice(0,10);
   const toISO   = to.toISOString().slice(0,10);
 
-  CTRL_ROWS = await fetchAllRows(
-    "control", "*",
-    "&mc_stoppage_time=gte." + fromISO + "&mc_stoppage_time=lte." + toISO + "T23:59:59"
-  );
+  // FIX 1: Fetch job_table exclusion list in parallel with control rows.
+  // This matches exactly how summary-report.html and grand-total-report.html
+  // exclude planned codes — by job_code column, not by description text.
+  const [ctrlRows, jobRes] = await Promise.all([
+    fetchAllRows(
+      "control", "*",
+      "&mc_stoppage_time=gte." + fromISO + "&mc_stoppage_time=lte." + toISO + "T23:59:59"
+    ),
+    fetch(SUPABASE_URL + "/rest/v1/job_table?select=job_code", { headers: authHeaders() })
+  ]);
+
+  if(jobRes.ok){
+    const jobRows = await jobRes.json();
+    EXCLUDED_JOB_CODES = new Set(jobRows.map(r => r.job_code));
+  } else {
+    // Non-fatal: if job_table fetch fails, fall back to hardcoded known codes
+    EXCLUDED_JOB_CODES = new Set(["BREAK","PRAYER","TOILET","LEAVE","EX","OPR"]);
+    console.warn("job_table fetch failed, using fallback exclusion list");
+  }
+
+  CTRL_ROWS = ctrlRows;
   CTRL_ROWS.forEach(normalizeControlRow);
 }
 
@@ -249,10 +254,10 @@ async function generate(){
 
   const rows = CTRL_ROWS.filter(r=>{
 
-    // FIX 1: Exclude planned / non-productive downtime codes.
-    // Mirrors the BigQuery view v_unplanned_downtime which strips BREAK,
-    // PRAYER, TOILET, LEAVE, EX, OPR before any aggregation.
-    if(isPlannedRow(r)) return false;
+    // FIX 1: Exclude planned / non-productive job codes via job_table.
+    // job_code is the column that stores BREAK, PRAYER, TOILET, LEAVE, EX, OPR
+    // etc. in the control table. Matches summary-report and grand-total-report.
+    if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
 
     // FIX 2: Use operational-day date (night-shift boundary at 06:00).
     // Mirrors the BigQuery view's Event_Date column.

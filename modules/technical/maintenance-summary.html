@@ -91,6 +91,9 @@ const selectedAssets = new Set([
   'WZ-01','WZ-02','WZ-03','WZ-04','WZ-05','WZ-06','WZ-07','WZ-08','WZ-09','WZ-10','WZ-11','WZ-12',
   'WZ-13','WZ-14','WZ-15','WZ-16','WZ-17','WZ-18'
 ]);
+// Hardcoded job codes to exclude — matches GAS script exactly:
+// AND Job_Code NOT IN ("OPR01","OPR02","OPR03","OPR04","WSP01","STR01")
+// This report uses a fixed list, NOT job_table, unlike other reports.
 const EXCLUDED_JOB_CODES = new Set(["OPR01","OPR02","OPR03","OPR04","WSP01","STR01"]);
 
 let CTRL_ROWS = []; CTRL_ROWS.forEach(normalizeControlRow);
@@ -156,9 +159,17 @@ async function generateReport(){
 
   const rows = CTRL_ROWS.filter(r=>{
     if(r.date_col < start || r.date_col > end) return false;
+    // GAS WHERE clause requires ALL THREE timestamps to be non-null:
+    // AND Starting_Time IS NOT NULL AND Finish_Time IS NOT NULL AND MC_Stoppage_Time IS NOT NULL
     if(!r.starting_time || !r.finish_time || !r.stop_time) return false;
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
-    if(section && r.section !== section) return false;
+    // FIX 2: Case/whitespace-insensitive section match — GAS uses UPPER(TRIM(Section)).
+    // Exact match r.section !== section misses records with trailing spaces or different casing.
+    if(section){
+      const rSec = (r.section || "").toUpperCase().trim();
+      const fSec = section.toUpperCase().trim();
+      if(rSec !== fSec) return false;
+    }
     if(shift && r.shift !== shift) return false;
     if(!selectedAssets.has(r.assets)) return false;
     return true;
@@ -169,12 +180,20 @@ async function generateReport(){
   let totalWaiting=0, totalRepair=0, totalDowntime=0, totalEstimated=0;
   const dailyTotals = {};
 
+  // All three timestamps are guaranteed non-null by the filter above (matching GAS WHERE clause).
+  // GAS computes:
+  //   Waiting  = TIMESTAMP_DIFF(Starting_Time, MC_Stoppage_Time, MINUTE)
+  //   Repair   = TIMESTAMP_DIFF(Finish_Time, Starting_Time, MINUTE)
+  //   Downtime = TIMESTAMP_DIFF(Finish_Time, MC_Stoppage_Time, MINUTE)
   rows.forEach(r=>{
-    const stop=parseDT(r.stop_time), start_t=parseDT(r.starting_time), finish=parseDT(r.finish_time);
-    const waiting = minutesBetween(stop, start_t);
-    const repair = minutesBetween(start_t, finish);
-    const downtime = minutesBetween(stop, finish);
+    const stop   = parseDT(r.stop_time);
+    const start  = parseDT(r.starting_time);
+    const finish = parseDT(r.finish_time);
     const estimated = extractNumber(r.extimated_time);
+
+    const waiting  = minutesBetween(stop,  start);   // start - stop
+    const repair   = minutesBetween(start, finish);  // finish - start
+    const downtime = minutesBetween(stop,  finish);  // finish - stop
 
     totalWaiting+=waiting; totalRepair+=repair; totalDowntime+=downtime; totalEstimated+=estimated;
 

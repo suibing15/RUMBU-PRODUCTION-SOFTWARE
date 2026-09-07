@@ -3282,12 +3282,6 @@ async function openRolePanelForProfile(id){
       <div id="role_pages"></div>
       <button onclick="saveRoleDetails('${id}','admin')">SAVE DETAILS</button>
 
-      <div class="grid" style="margin-top:16px;">
-        <div><label>New Password</label><input id="role_new_password" type="password"></div>
-        <div><label>Confirm New Password</label><input id="role_confirm_password" type="password"></div>
-      </div>
-      <button onclick="resetRolePassword('${id}')">RESET PASSWORD</button>
-
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>
     `;
@@ -3306,12 +3300,6 @@ async function openRolePanelForProfile(id){
       <label style="margin-top:14px;">Pages (tick the exact modules and pages this account may use)</label>
       <div id="role_pages"></div>
       <button onclick="saveRoleDetails('${id}','user')">SAVE DETAILS</button>
-
-      <div class="grid" style="margin-top:16px;">
-        <div><label>New Password</label><input id="role_new_password" type="password"></div>
-        <div><label>Confirm New Password</label><input id="role_confirm_password" type="password"></div>
-      </div>
-      <button onclick="resetRolePassword('${id}')">RESET PASSWORD</button>
 
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>

@@ -2039,6 +2039,16 @@ function openEmployeeDetail(empId){
     } else {
       html += "<p class=\"sub\" style=\"margin:0;\">This account already has access" + (isAdmin ? " (role changes are a Super Admin action)." : ".") + "</p>";
     }
+    // Reset password — for when a staff member forgets theirs. Resets to the
+    // temporary password and forces a change on next login. Not offered for
+    // Super Admin accounts (protected server-side too).
+    if(e.linked_profile_id && e.linked_role !== "super_admin"){
+      html += "<div style=\"margin-top:12px;padding-top:12px;border-top:1px solid var(--line);\">" +
+        "<label>Forgot their password?</label>" +
+        "<button style=\"margin:0;padding:8px 12px;\" onclick=\"resetAccessPassword(" + e.id + ")\">Reset Password</button>" +
+        "<div class=\"sub\" style=\"margin-top:6px;\">Sets it to the temporary password <b>" + TEMP_ACCESS_PASSWORD + "</b>; they must change it on next login.</div>" +
+      "</div>";
+    }
   } else {
     // Granting creates the login account directly: username = Employee ID,
     // temporary password, forced change on first login. Everyone starts as a
@@ -2938,6 +2948,7 @@ async function grantAccessToEmployee(empId){
     await callEdgeFunction({ action: "link_employee", employee_id: emp.id, profile_id: res.id });
     await logActivity("access_granted", ME.username + " granted access to \"" + emp.full_name + "\" (" + emp.employee_id + ") - username " + emp.employee_id);
     await loadEmployeeDirectory();
+    await loadRoleDropdown(); // refresh MANAGEABLE_IDS — otherwise Manage Role wrongly says this brand-new account "cannot be managed" until a full page reload
     openEmployeeDetail(empId);
     const st2 = document.getElementById("emp_detail_status");
     if(st2){ st2.className = "status ok"; st2.textContent = "✅ Access granted. Username " + emp.employee_id + ", temporary password " + TEMP_ACCESS_PASSWORD + " (they must change it on first login)."; }

@@ -691,8 +691,28 @@
     onDashBranchChange();
   }
 
+  // Dashboards are now granted per-PERSON via assigned_pages, exactly like
+  // every other module — consistent with the rest of the system, and
+  // collapses "grant + branch-map" down to one step (just grant it).
+  // The branchName argument is kept purely so existing callers (the
+  // Dashboard picker's branch dropdown) don't need touching — it's just no
+  // longer used to filter which Dashboards appear.
+  //
+  // ROLLBACK: if this ever needs undoing, no database change is required —
+  // just swap this function's body for dashboardsForBranch_LEGACY's body
+  // below (or rename the calls), and branch-gated Dashboards return exactly
+  // as they were. BRANCH_PATHS/page_sections are still computed above,
+  // untouched, so the legacy path keeps working immediately.
   function dashboardsForBranch(branchName){
     if(ME.role === "user") return []; // Dashboards are Admin/Super Admin only
+    return ALL_DASHBOARDS.filter(d => MY_ALLOWED_PATHS.has(d.module_path));
+  }
+
+  // Preserved, currently unused — the original per-branch gating logic,
+  // kept intact for a one-line rollback if the change above ever needs
+  // reverting. Do not delete.
+  function dashboardsForBranch_LEGACY(branchName){
+    if(ME.role === "user") return [];
     const allowed = BRANCH_PATHS[branchName] || new Set();
     return ALL_DASHBOARDS.filter(d => allowed.has(d.module_path));
   }

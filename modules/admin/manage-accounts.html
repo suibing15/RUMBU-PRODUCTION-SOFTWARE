@@ -178,10 +178,6 @@
         <div class="field"><label>Salary (₦)</label><input id="new_emp_salary" type="number" step="0.01" placeholder="Leave blank if unknown"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>Email <span style="color:var(--muted);font-weight:400;">(optional)</span></label><input id="new_emp_email" type="email" placeholder="e.g. name@rumbuindustries.com"></div>
-        <div class="field"><label>Phone Number <span style="color:var(--muted);font-weight:400;">(optional)</span></label><input id="new_emp_phone" inputmode="tel" placeholder="e.g. 0803 000 0000"></div>
-      </div>
-      <div class="form-row">
         <div class="field"><label>Bank Name</label><input id="new_emp_bank_name" placeholder="e.g. GTBank"></div>
         <div class="field"><label>Bank Account Number</label><input id="new_emp_bank_account_number" inputmode="numeric" placeholder="e.g. 0123456789"></div>
         <div class="field"><label>Sort Code</label><input id="new_emp_sort_code" placeholder="e.g. 058-152-036"></div>
@@ -348,10 +344,6 @@
       </div>
     </div>
     <div class="field"><label>Rank</label><input id="admin_new_emp_rank" list="admin_new_emp_rank_list" placeholder="e.g. Officer"><datalist id="admin_new_emp_rank_list"></datalist></div>
-    <div class="form-row">
-      <div class="field"><label>Email <span style="color:var(--muted);font-weight:400;">(optional)</span></label><input id="admin_new_emp_email" type="email" placeholder="e.g. name@rumbuindustries.com"></div>
-      <div class="field"><label>Phone Number <span style="color:var(--muted);font-weight:400;">(optional)</span></label><input id="admin_new_emp_phone" inputmode="tel" placeholder="e.g. 0803 000 0000"></div>
-    </div>
     <div class="form-row">
       <div class="field"><label>Bank Name</label><input id="admin_new_emp_bank_name" placeholder="e.g. GTBank"></div>
       <div class="field"><label>Bank Account Number</label><input id="admin_new_emp_bank_account_number" inputmode="numeric" placeholder="e.g. 0123456789"></div>
@@ -3276,46 +3268,35 @@ async function openRolePanelForProfile(id){
   const { data: profile, error } = await sb.from("profiles").select("id, username, role").eq("id", id).single();
   if(error || !profile){ panel.innerHTML = "Error loading account."; panel.classList.remove("hidden"); return; }
 
-  const { data: ps } = await sb.from("profile_sections").select("section_id").eq("profile_id", id);
-  const assignedSectionIds = (ps||[]).map(r=>r.section_id);
-
   if(profile.role === "admin"){
     const { data: ap } = await sb.from("assigned_pages").select("page_id").eq("profile_id", id);
     const assignedPageIds = (ap||[]).map(r=>r.page_id);
-    const availableSectionIds = ME.role === "super_admin" ? ALL_SECTIONS.map(s=>s.id) : (ME.sectionIds || []);
 
     panel.innerHTML = `
       <p class="sub" style="margin-top:0;">Managing <b>${esc(profile.username)}</b> — role: <b>${esc(profile.role)}</b></p>
       <label>Username</label><input id="role_username" value="${esc(profile.username)}">
-      <label>Branches (which Branches this Admin is scoped to)</label>
-      <div id="role_branches"></div>
-      <label style="margin-top:14px;">Pages (tick the exact modules and pages this Admin may use)</label>
+      <label>Pages (tick the exact modules and pages this Admin may use)</label>
       <div id="role_pages"></div>
       <button onclick="saveRoleDetails('${id}','admin')">SAVE DETAILS</button>
 
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>
     `;
-    renderPlainBranchPicker("role_branches", availableSectionIds, assignedSectionIds);
     await renderPagesByModuleOnly("role_pages", assignedPageIds);
   } else {
     const { data: ap } = await sb.from("assigned_pages").select("page_id").eq("profile_id", id);
     const assignedPageIds = (ap||[]).map(r=>r.page_id);
-    const availableSectionIds = ME.role === "super_admin" ? ALL_SECTIONS.map(s=>s.id) : (ME.sectionIds || []);
 
     panel.innerHTML = `
       <p class="sub" style="margin-top:0;">Managing <b>${esc(profile.username)}</b> — role: <b>${esc(profile.role)}</b></p>
       <label>Username</label><input id="role_username" value="${esc(profile.username)}">
-      <label>Branches (which Branches this account is scoped to)</label>
-      <div id="role_branches"></div>
-      <label style="margin-top:14px;">Pages (tick the exact modules and pages this account may use)</label>
+      <label>Pages (tick the exact modules and pages this account may use)</label>
       <div id="role_pages"></div>
       <button onclick="saveRoleDetails('${id}','user')">SAVE DETAILS</button>
 
       <div class="status" id="role_status"></div>
       <button class="danger" onclick="deleteRoleAccount('${id}','${esc(profile.username)}')">DELETE ACCOUNT</button>
     `;
-    renderPlainBranchPicker("role_branches", availableSectionIds, assignedSectionIds);
     await renderPagesByModuleOnly("role_pages", assignedPageIds);
   }
   panel.classList.remove("hidden");
@@ -3339,40 +3320,16 @@ async function saveRoleDetails(id, role){
     const { error: uErr } = await sb.from("profiles").update({ username }).eq("id", id);
     if(uErr) throw uErr;
 
-    if(role === "admin"){
-      const sectionIds = getCheckedPlainBranches("role_branches");
-      const pageIds = getCheckedPagesOnly("role_pages");
-      const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
-      if(delSecErr) throw delSecErr;
-      if(sectionIds.length){
-        const secRows = sectionIds.map(s=>({ profile_id: id, section_id: s }));
-        const { error: insSecErr } = await sb.from("profile_sections").insert(secRows);
-        if(insSecErr) throw insSecErr;
-      }
-      const { error: delPageErr } = await sb.from("assigned_pages").delete().eq("profile_id", id);
-      if(delPageErr) throw delPageErr;
-      if(pageIds.length){
-        const pageRows = pageIds.map(p=>({ profile_id: id, page_id: p }));
-        const { error: insPageErr } = await sb.from("assigned_pages").insert(pageRows);
-        if(insPageErr) throw insPageErr;
-      }
-    } else {
-      const sectionIds = getCheckedPlainBranches("role_branches");
-      const pageIds = getCheckedPagesOnly("role_pages");
-      const { error: delSecErr } = await sb.from("profile_sections").delete().eq("profile_id", id);
-      if(delSecErr) throw delSecErr;
-      if(sectionIds.length){
-        const secRows = sectionIds.map(s=>({ profile_id: id, section_id: s }));
-        const { error: insSecErr } = await sb.from("profile_sections").insert(secRows);
-        if(insSecErr) throw insSecErr;
-      }
-      const { error: delPageErr } = await sb.from("assigned_pages").delete().eq("profile_id", id);
-      if(delPageErr) throw delPageErr;
-      if(pageIds.length){
-        const pageRows = pageIds.map(p=>({ profile_id: id, page_id: p }));
-        const { error: insPageErr } = await sb.from("assigned_pages").insert(pageRows);
-        if(insPageErr) throw insPageErr;
-      }
+    // Branches/profile_sections is no longer set from here — removed per
+    // request. Whatever Branch scoping an account already has stays exactly
+    // as-is; this Save only ever touches Username and Pages now.
+    const pageIds = getCheckedPagesOnly("role_pages");
+    const { error: delPageErr } = await sb.from("assigned_pages").delete().eq("profile_id", id);
+    if(delPageErr) throw delPageErr;
+    if(pageIds.length){
+      const pageRows = pageIds.map(p=>({ profile_id: id, page_id: p }));
+      const { error: insPageErr } = await sb.from("assigned_pages").insert(pageRows);
+      if(insPageErr) throw insPageErr;
     }
 
     status.className = "status ok"; status.textContent = "✅ Details saved.";

@@ -83,10 +83,11 @@ async function init(){
     document.getElementById("sectionSel").innerHTML = (sections||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join("")
       || `<option value="">No branches configured</option>`;
     // Fillers/approvers are picked from the real employee directory (global,
-    // shared with the rest of the system) rather than a raw account list —
-    // only employees who already have a linked login account can actually
-    // act as a filler/approver, so that's the pool we search.
-    const { data: staff } = await sb.from("employees").select("id,employee_id,full_name,branch,linked_profile_id").not("linked_profile_id","is",null).order("full_name");
+    // shared with the rest of the system). Fetches the FULL roster (not just
+    // those with a login already) so the branch list below shows everyone —
+    // an employee without system access yet just can't be Added until
+    // they're granted one, same rule as before.
+    const { data: staff } = await sb.from("employees").select("id,employee_id,full_name,branch,linked_profile_id").order("full_name");
     ALL_STAFF = staff||[];
     await loadAll();
     cs.style.color="var(--ok)"; cs.textContent="Connected.";
@@ -119,12 +120,44 @@ async function loadAll(){
       <h4>Fillers <span style="font-weight:400;color:var(--muted);">(who fills this stage)</span></h4>
       <div id="fillerList">${renderPersonList(fillers||[], 'filler')}</div>
       ${pinSearchHtml('filler')}
+      ${renderBranchEmployeeList('filler')}
     </div>
     <div class="assign-card">
       <h4>Approvers <span style="font-weight:400;color:var(--muted);">(ALL must approve)</span></h4>
       <div id="approverList">${renderPersonList(approvers||[], 'approver')}</div>
       ${pinSearchHtml('approver')}
+      ${renderBranchEmployeeList('approver')}
     </div>`;
+}
+
+// Browsable list of every employee tied to the selected Branch — lets an
+// admin pick straight from the roster instead of needing to know each
+// person's exact Employee Code. Anyone without system access yet is shown
+// but can't be Added until they're granted one (Employee Directory).
+function renderBranchEmployeeList(role){
+  const section = document.getElementById("sectionSel").value;
+  if(!section) return `<p style="font-size:12px;color:var(--muted);margin-top:12px;">Select a Branch to see its employees.</p>`;
+
+  const already = role==='filler' ? FILLER_IDS : APPROVER_IDS;
+  const branchEmps = ALL_STAFF.filter(e=>e.branch===section).sort((a,b)=>a.full_name.localeCompare(b.full_name));
+  if(!branchEmps.length){
+    return `<p style="font-size:12px;color:var(--muted);margin-top:12px;">No employees on record for ${section} yet.</p>`;
+  }
+
+  return `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px;">
+    <label style="margin:0 0 6px;">All ${section} Employees</label>
+    <div style="max-height:220px;overflow-y:auto;">
+      ${branchEmps.map(e=>{
+        const hasAccess = !!e.linked_profile_id;
+        const isAssigned = hasAccess && already.has(e.linked_profile_id);
+        let action;
+        if(!hasAccess) action = `<span style="font-size:11px;color:var(--muted);">No login yet</span>`;
+        else if(isAssigned) action = `<span style="font-size:11px;color:var(--ok);">✔ Assigned</span>`;
+        else action = `<button onclick="confirmAddStaff('${role}', ${e.linked_profile_id})" style="padding:3px 10px;font-size:11px;">Add</button>`;
+        return `<div class="person-row"><span>${e.full_name} <span style="color:var(--muted);">(${e.employee_id})</span></span>${action}</div>`;
+      }).join("")}
+    </div>
+  </div>`;
 }
 
 function pinSearchHtml(role){
@@ -169,6 +202,10 @@ function searchStaffByPin(role, code){
   }
   if(match.branch !== section){
     resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} belongs to ${match.branch||"no branch set"}, not ${section}.</span>`;
+    return;
+  }
+  if(!match.linked_profile_id){
+    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} has no system access yet — grant it in Employee Directory first.</span>`;
     return;
   }
   const already = role==='filler' ? FILLER_IDS : APPROVER_IDS;

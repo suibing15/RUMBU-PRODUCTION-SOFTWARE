@@ -144,7 +144,10 @@ function getJobCodesByDepartment(department){
 async function fetchAllControlRows(){
   const pageSize=1000; let all=[], offset=0;
   while(true){
-    const res = await fetch(SUPABASE_URL + "/rest/v1/control?select=*&limit="+pageSize+"&offset="+offset, { headers: authHeaders() });
+    // FIX: stable pagination — without ORDER BY, Supabase returns rows in
+    // undefined physical order, causing page boundaries to shift between runs
+    // and the same nurse's records to be missed or duplicated across pages.
+    const res = await fetch(SUPABASE_URL + "/rest/v1/control?select=*&order=id.asc&limit="+pageSize+"&offset="+offset, { headers: authHeaders() });
     if(!res.ok) throw new Error("HTTP " + res.status);
     const page = await res.json();
     all = all.concat(page);
@@ -193,7 +196,11 @@ async function fetchAllRows(table, select, query){
   const q = query || "";
   for(let guard=0; guard<500; guard++){
     const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset + "-" + (offset+pageSize-1) });
-    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q, { headers });
+    // FIX: &order=id.asc ensures stable, deterministic pagination.
+    // Without ORDER BY, Supabase returns rows in undefined physical order —
+    // page boundaries shift between calls, causing rows to be missed or
+    // duplicated across pages. This makes report totals non-reproducible.
+    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q + "&order=id.asc", { headers });
     if(!res.ok) throw new Error(table + ": HTTP " + res.status);
     const batch = await res.json();
     all = all.concat(batch);

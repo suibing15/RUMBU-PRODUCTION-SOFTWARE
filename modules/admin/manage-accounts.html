@@ -141,8 +141,8 @@
     <button class="tab-btn" id="tabbtn-employee-directory" onclick="showCreateTab('tab-employee-directory')">Employee Directory</button>
     <button class="tab-btn" id="tabbtn-add-branch-dept" onclick="showCreateTab('tab-add-branch-dept')">Add Branch or Module</button>
     <button class="tab-btn" id="tabbtn-manage-departments" onclick="showCreateTab('tab-manage-departments')">Manage Departments &amp; Units</button>
-    <button class="tab-btn" id="tabbtn-manage-branch-dept" onclick="showCreateTab('tab-manage-branch-dept')">Manage Branch or Department</button>
-    <button class="tab-btn" id="tabbtn-branch-modules" onclick="showCreateTab('tab-branch-modules')">Branch Modules</button>
+    <button class="tab-btn" id="tabbtn-manage-branches" onclick="showCreateTab('tab-manage-branches')">Manage Branches</button>
+    <button class="tab-btn" id="tabbtn-manage-modules" onclick="showCreateTab('tab-manage-modules')">Manage Modules</button>
   </div>
 
   <div class="tab-content" id="tab-employee-directory">
@@ -269,10 +269,10 @@
     </div>
   </div>
 
-  <div class="tab-content hidden" id="tab-manage-branch-dept">
-    <h3>Manage Branch or Module</h3>
-    <p class="sub">Click a Branch to expand it and see its mapped Modules — rename or delete either, right here</p>
-    <div id="branchDeptTreeWrap"></div>
+  <div class="tab-content hidden" id="tab-manage-branches">
+    <h3>Manage Branches</h3>
+    <p class="sub">Rename or delete a real Branch. This no longer gates which Modules an Admin or User can be given — that's set entirely in Manage Role now, independent of Branch.</p>
+    <div id="branchesFlatWrap"></div>
     <div class="status" id="branch_dept_status"></div>
   </div>
 
@@ -300,18 +300,11 @@
     </div>
   </div>
 
-  <div class="tab-content hidden" id="tab-branch-modules">
-    <h3>Branch Modules</h3>
-    <p class="sub">Choose a Branch, then tick the modules that Branch should have. This sets the pool of modules an Admin or User in that Branch can be given. Task Management is always on and cannot be removed.</p>
-    <label>Branch</label>
-    <select id="bm_branch" onchange="loadBranchModules()"><option value="">— select a Branch —</option></select>
-    <div id="bm_modules" style="margin-top:12px;"></div>
-    <div style="margin-top:12px;">
-      <button onclick="saveBranchModules()">SAVE BRANCH MODULES</button>
-      <button class="ghost" onclick="bmSelectAll(true)">Tick all</button>
-      <button class="ghost" onclick="bmSelectAll(false)">Untick all</button>
-    </div>
-    <div class="status" id="bm_status"></div>
+  <div class="tab-content hidden" id="tab-manage-modules">
+    <h3>Manage Modules</h3>
+    <p class="sub">Rename or delete a real Module (sidebar folder — e.g. "Overtime", "PET Collection"). Independent of Branch now — a Module either exists or it doesn't; who can use it is set entirely in Manage Role.</p>
+    <div id="modulesFlatWrap"></div>
+    <div class="status" id="module_dept_status"></div>
   </div>
 </div>
 
@@ -647,11 +640,47 @@ function showCreateTab(tabId){
   document.querySelectorAll(".tab-btn").forEach(el=>el.classList.remove("active"));
   document.getElementById(tabId).classList.remove("hidden");
   document.getElementById("tabbtn-" + tabId.replace("tab-", "")).classList.add("active");
-  if(tabId === "tab-manage-branch-dept"){
-    loadBranchDeptTree();
+  if(tabId === "tab-manage-branches"){
+    loadBranchesFlat();
+  } else if(tabId === "tab-manage-modules"){
+    loadModulesFlat();
   }
 }
 
+// Flat, independent Branches list — no Module nesting, no page_sections
+// query. Branch access no longer gates Modules (that's Manage Role's job
+// now), so there's nothing to nest here anymore.
+async function loadBranchesFlat(){
+  const wrap = document.getElementById("branchesFlatWrap");
+  wrap.innerHTML = "Loading...";
+  const { data, error } = await sb.from("app_sections").select("id,name").order("name");
+  if(error){ wrap.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ wrap.innerHTML = "<p class='sub'>No Branches yet.</p>"; return; }
+  wrap.innerHTML = data.map(b=>`<div class="dept-row">
+    <input id="branch_head_${b.id}" value="${b.name}">
+    <button class="mini-btn" onclick="renameBranch(${b.id})">💾 Save</button>
+    <button class="mini-btn" onclick="deleteBranch(${b.id}, document.getElementById('branch_head_${b.id}').value)">🗑️ Delete</button>
+  </div>`).join("");
+}
+
+// Flat, independent Modules list — same reasoning as Branches above.
+async function loadModulesFlat(){
+  const wrap = document.getElementById("modulesFlatWrap");
+  wrap.innerHTML = "Loading...";
+  const { data, error } = await sb.from("modules").select("id,name").order("name");
+  if(error){ wrap.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ wrap.innerHTML = "<p class='sub'>No Modules yet.</p>"; return; }
+  wrap.innerHTML = data.map(m=>`<div class="dept-row">
+    <input id="module_head_${m.id}" value="${m.name}">
+    <button class="mini-btn" onclick="renameDepartment(${m.id}, 'module_head_${m.id}')">💾 Save</button>
+    <button class="mini-btn" onclick="deleteDepartment(${m.id}, document.getElementById('module_head_${m.id}').value)">🗑️ Delete</button>
+  </div>`).join("");
+}
+
+// Preserved, currently unused — the original branch-nested tree (built on
+// page_sections, which nothing reads for access-gating anymore now that
+// Dashboards are person-granted too). Kept intact for reference/rollback;
+// not called from anywhere. Do not delete.
 async function loadBranchDeptTree(){
   const wrap = document.getElementById("branchDeptTreeWrap");
   wrap.innerHTML = "Loading...";
@@ -715,14 +744,14 @@ async function renameBranch(id){
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
     buildSectionDisplayNames();
-    await loadBranchDeptTree();
+    await loadBranchesFlat();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
   }
 }
 
 async function renameDepartment(id, cellId){
-  const status = document.getElementById("branch_dept_status");
+  const status = document.getElementById("module_dept_status");
   const newName = document.getElementById(cellId).value.trim();
   if(!newName){ status.className="status err"; status.textContent="Module name cannot be empty."; return; }
 
@@ -732,7 +761,7 @@ async function renameDepartment(id, cellId){
     if(error) throw error;
     status.className = "status ok"; status.textContent = "✅ Module renamed.";
     await logActivity("department_renamed", ME.username + " renamed a Module to \"" + newName + "\"");
-    await loadBranchDeptTree();
+    await loadModulesFlat();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
   }
@@ -749,7 +778,7 @@ async function addBranch(){
     if(error) throw error;
     // Always give a brand-new branch the compulsory Task Management pages.
     await ensureTaskManagement(inserted.id);
-    status.className = "status ok"; status.textContent = "✅ Branch added (Task Management enabled). Use the Branch Modules tab to add more.";
+    status.className = "status ok"; status.textContent = "✅ Branch added (Task Management enabled).";
     document.getElementById("new_branch_name").value = "";
     await logActivity("branch_added", ME.username + " added Branch \"" + name + "\"");
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
@@ -1139,7 +1168,7 @@ async function deleteBranch(id, name){
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
     buildSectionDisplayNames();
-    await loadBranchDeptTree();
+    await loadBranchesFlat();
   }catch(e){
     alert("❌ " + e.message + "\n\nThis Branch is likely still assigned to an account.");
   }
@@ -1151,7 +1180,7 @@ async function deleteDepartment(id, name){
     const { error } = await sb.from("modules").delete().eq("id", id);
     if(error) throw error;
     await logActivity("department_deleted", ME.username + " deleted Module \"" + name + "\"");
-    await loadBranchDeptTree();
+    await loadModulesFlat();
   }catch(e){
     alert("❌ " + e.message + "\n\nThis Module is likely still holding registered pages.");
   }

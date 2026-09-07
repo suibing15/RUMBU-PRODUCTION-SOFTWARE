@@ -240,13 +240,19 @@ async function generate(){
 
   let downtime=0, repairTime=0;
   rows.forEach(r=>{
-    const d   = minutesBetween(parseDT(r.stop_time),     parseDT(r.finish_time));
-    const rep = minutesBetween(parseDT(r.starting_time), parseDT(r.finish_time));
-    // Only skip truly impossible values (negative = finish before start/stop).
-    // Long legitimate jobs (Workshop Job spanning several days) must be kept — the
-    // old AppScript had no cap; specific Department filters naturally excluded bad
-    // records. Negative repair is the only truly impossible condition.
-    if(d < 0 || rep < 0) return;
+    // FIX: Mirror BigQuery's TIMESTAMP_DIFF null behaviour exactly.
+    // TIMESTAMP_DIFF returns NULL when either argument is NULL, and
+    // SUM() ignores NULLs — so any record missing a timestamp is skipped.
+    // minutesBetween() was returning 0 for null inputs, causing records
+    // with missing timestamps to partially contribute (e.g. repair counted
+    // but downtime=0, or downtime counted but repair=0), skewing both totals.
+    const tStop  = parseDT(r.stop_time);
+    const tStart = parseDT(r.starting_time);
+    const tFinish= parseDT(r.finish_time);
+    if(!tStop || !tStart || !tFinish) return; // skip — mirrors SQL NULL behaviour
+    const d   = Math.trunc((tFinish - tStop)  / 60000);
+    const rep = Math.trunc((tFinish - tStart) / 60000);
+    if(d < 0 || rep < 0) return; // skip impossible values
     downtime   += d;
     repairTime += rep;
   });

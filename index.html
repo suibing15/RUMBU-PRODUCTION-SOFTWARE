@@ -688,7 +688,28 @@
       return;
     }
     branchSel.value = MY_BRANCHES[0].name;
-    onDashBranchChange();
+    applySidebarForBranch(branchSel.value);
+    initDashboardPicker();
+  }
+
+  // Populates the Dashboard picker ONCE. Dashboards are person-granted and
+  // branch-independent now (see dashboardsForBranch above), so this no
+  // longer needs to re-run on every branch tab switch — only sidebar
+  // module visibility does that (see onDashBranchChange below).
+  function initDashboardPicker(){
+    const dashes = dashboardsForBranch(null); // branchName is unused now
+    const pick = document.getElementById("dashPick");
+    pick.innerHTML = dashes.map(d=>`<option value="${d.module_path}">${d.display_name}</option>`).join("");
+    if(dashes.length){
+      pick.parentElement.style.display = "";
+      document.getElementById("dashEmpty").style.display = "none";
+      pick.value = dashes[0].module_path;
+      showDashboard(dashes[0].module_path);
+    }else{
+      pick.parentElement.style.display = "none";
+      document.getElementById("dashFrame").style.display = "none";
+      document.getElementById("dashEmpty").style.display = "block";
+    }
   }
 
   // Dashboards are now granted per-PERSON via assigned_pages, exactly like
@@ -717,10 +738,28 @@
     return ALL_DASHBOARDS.filter(d => allowed.has(d.module_path));
   }
 
+  // Branch switching now ONLY affects sidebar module visibility — the
+  // Dashboard picker (populated once in initDashboardPicker() above) is
+  // deliberately left alone across branch changes, since Dashboards no
+  // longer depend on branch.
+  //
+  // ROLLBACK: if branch-gated Dashboards are ever restored via
+  // dashboardsForBranch_LEGACY, restore this function's old behavior too
+  // — preserved intact as onDashBranchChange_LEGACY right below — so
+  // switching branches goes back to re-filtering the Dashboard picker.
   window.onDashBranchChange = function(){
     const branchName = document.getElementById("dashBranch").value;
-    applySidebarForBranch(branchName);            // tracks CURRENT_BRANCH + refreshes an open flyout; sidebar contents are person-based, not branch-based
-    const dashes = dashboardsForBranch(branchName);
+    applySidebarForBranch(branchName);
+  };
+
+  // Preserved, currently unused — the original behavior where changing
+  // Branch also re-filtered and reset the Dashboard picker. Kept intact
+  // for a one-line rollback alongside dashboardsForBranch_LEGACY. Do not
+  // delete.
+  function onDashBranchChange_LEGACY(){
+    const branchName = document.getElementById("dashBranch").value;
+    applySidebarForBranch(branchName);
+    const dashes = dashboardsForBranch_LEGACY(branchName);
     const pick = document.getElementById("dashPick");
     pick.innerHTML = dashes.map(d=>`<option value="${d.module_path}">${d.display_name}</option>`).join("");
     if(dashes.length){
@@ -733,7 +772,7 @@
       document.getElementById("dashFrame").style.display = "none";
       document.getElementById("dashEmpty").style.display = "block";
     }
-  };
+  }
 
   window.onDashPickChange = function(){
     showDashboard(document.getElementById("dashPick").value);

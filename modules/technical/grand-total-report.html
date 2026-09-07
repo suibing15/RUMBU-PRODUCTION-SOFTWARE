@@ -201,8 +201,10 @@ async function generate(){
   const status = document.getElementById("status");
   status.style.color=""; status.textContent = "Loading…";
   try{
-    // Use mc_stoppage_time filter — matches old script's DATE(MC_Stoppage_Time) BETWEEN
-    CTRL_ROWS = await fetchAllRows("control","*", "&mc_stoppage_time=gte."+dateFrom+"&mc_stoppage_time=lte."+dateTo+"T23:59:59");
+    // FIX: Filter on the date column (operator-recorded date = BigQuery Event_Date).
+    // Matches DATE(m.MC_Stoppage_Time) in the GAS script — the operator's recorded
+    // date, NOT the raw timestamp. Same fix applied to downtime-by-assets.html.
+    CTRL_ROWS = await fetchAllRows("control","*", "&date=gte."+dateFrom+"&date=lte."+dateTo);
     CTRL_ROWS.forEach(normalizeControlRow);
   }catch(e){
     status.style.color="#c0392b"; status.textContent = "Could not read data: " + (e.message||e); return;
@@ -210,9 +212,11 @@ async function generate(){
   status.textContent = "";
 
   const rows = CTRL_ROWS.filter(r=>{
-    // Date: use mc_stoppage_time date — matches old script's DATE(MC_Stoppage_Time) BETWEEN
-    const stopDate = r.stop_time ? r.stop_time.slice(0,10) : r.date_col;
-    if(stopDate < dateFrom || stopDate > dateTo) return false;
+    // FIX: Use date_col (operator-recorded date) — same as BigQuery Event_Date.
+    // Do NOT derive from mc_stoppage_time; night-shift timestamps cross midnight
+    // and cause boundary records to land on the wrong day.
+    const recDate = r.date_col || null;
+    if(!recDate || recDate < dateFrom || recDate > dateTo) return false;
     // Exclude job_table codes (operational codes like EX01-EX10)
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
     // Department: filter by actual department COLUMN — matches old AppScript's
@@ -221,25 +225,34 @@ async function generate(){
     if(department !== "All" && (r.department||"").trim() !== department) return false;
     // Shift
     if(shift !== "All" && r.shift !== shift) return false;
-    // Section: LIKE logic matches old AppScript's UPPER(TRIM(Section)) pattern
+    // FIX: Section filter.
+    // The GAS script uses AND Section=@section where the value passed is exactly
+    // "Mama Sannu" (with a space) or "Rumbu". The Supabase column stores it with
+    // a space too, so we must check for "MAMA SANNU" (space), not "MAMASANNU".
     if(section !== "All"){
       const sec = (r.section||"").toUpperCase().trim();
-      if(section === "MamaSannu" && !sec.includes("MAMASANNU")) return false;
-      if(section === "Rumbu" && sec.includes("MAMASANNU")) return false;
-      if(section !== "MamaSannu" && section !== "Rumbu" && sec !== section.toUpperCase()) return false;
+      const isMama = sec === "MAMA SANNU" || sec.includes("MAMA SANNU");
+      if(section === "MamaSannu" && !isMama) return false;
+      if(section === "Rumbu"     &&  isMama) return false;
     }
     return true;
   });
 
   let downtime=0, repairTime=0;
   rows.forEach(r=>{
-    const d   = minutesBetween(parseDT(r.stop_time),     parseDT(r.finish_time));
-    const rep = minutesBetween(parseDT(r.starting_time), parseDT(r.finish_time));
-    // Only skip truly impossible values (negative = finish before start/stop).
-    // Long legitimate jobs (Workshop Job spanning several days) must be kept — the
-    // old AppScript had no cap; specific Department filters naturally excluded bad
-    // records. Negative repair is the only truly impossible condition.
-    if(d < 0 || rep < 0) return;
+    // FIX: Mirror BigQuery's TIMESTAMP_DIFF null behaviour exactly.
+    // TIMESTAMP_DIFF returns NULL when either argument is NULL, and
+    // SUM() ignores NULLs — so any record missing a timestamp is skipped.
+    // minutesBetween() was returning 0 for null inputs, causing records
+    // with missing timestamps to partially contribute (e.g. repair counted
+    // but downtime=0, or downtime counted but repair=0), skewing both totals.
+    const tStop  = parseDT(r.stop_time);
+    const tStart = parseDT(r.starting_time);
+    const tFinish= parseDT(r.finish_time);
+    if(!tStop || !tStart || !tFinish) return; // skip — mirrors SQL NULL behaviour
+    const d   = Math.trunc((tFinish - tStop)  / 60000);
+    const rep = Math.trunc((tFinish - tStart) / 60000);
+    if(d < 0 || rep < 0) return; // skip impossible values
     downtime   += d;
     repairTime += rep;
   });

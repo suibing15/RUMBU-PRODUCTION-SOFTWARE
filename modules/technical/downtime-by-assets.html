@@ -107,25 +107,14 @@ function normalizeControlRow(r){
   return r;
 }
 
-// FIX 2: Operational-day date derivation.
-// The BigQuery view uses Event_Date — the operational shift day — rather than
-// the raw mc_stoppage_time timestamp. For night shifts that cross midnight,
-// mc_stoppage_time may fall on the next calendar day, while Event_Date keeps
-// the record on the day the shift started. We replicate that logic here:
-// if the stoppage is before 06:00 local time we attribute it to the previous
-// calendar day (i.e. the night shift that started the evening before).
-function operationalDate(r){
-  const raw = r.stop_time || r.date_col;
-  if(!raw) return null;
-  const d = new Date(raw);
-  if(isNaN(d)) return null;
-  // Night-shift boundary: anything before 06:00 belongs to the previous day
-  if(d.getHours() < 6){
-    const prev = new Date(d);
-    prev.setDate(prev.getDate() - 1);
-    return prev.toISOString().slice(0,10);
-  }
-  return d.toISOString().slice(0,10);
+// FIX 2: Use the operator-recorded date (date_col) directly.
+// The BigQuery view's Event_Date is exactly the date_col stored field — set
+// by the control room operator at data entry time. summary-report.html and
+// every other report in this codebase filter on r.date_col for this reason.
+// Deriving the date from mc_stoppage_time with a 06:00 cutoff was wrong: it
+// caused ±1 count errors on boundary records and did not match the GAS view.
+function getRecordDate(r){
+  return r.date_col || null;
 }
 
 const DEPARTMENTS = {
@@ -201,13 +190,11 @@ async function init(){
 }
 
 async function fetchRangeControl(fromDate, toDate){
-  // FIX 2: Widen the fetch window by one day on each side to capture night-shift
-  // records whose mc_stoppage_time timestamp crosses midnight. The operational-day
-  // logic in operationalDate() then assigns them to the correct shift day.
-  const from = new Date(fromDate); from.setDate(from.getDate() - 1);
-  const to   = new Date(toDate);   to.setDate(to.getDate()   + 1);
-  const fromISO = from.toISOString().slice(0,10);
-  const toISO   = to.toISOString().slice(0,10);
+  // FIX 2: Filter on the date column (operator-recorded date), matching
+  // exactly how summary-report.html fetches control rows. This is the
+  // same as the BigQuery view's Event_Date — a stored field, not derived.
+  // The monitoring-room code notes the control table uses a column called
+  // "date" (normalised to date_col by normalizeControlRow).
 
   // FIX 1: Fetch job_table exclusion list in parallel with control rows.
   // This matches exactly how summary-report.html and grand-total-report.html
@@ -215,7 +202,7 @@ async function fetchRangeControl(fromDate, toDate){
   const [ctrlRows, jobRes] = await Promise.all([
     fetchAllRows(
       "control", "*",
-      "&mc_stoppage_time=gte." + fromISO + "&mc_stoppage_time=lte." + toISO + "T23:59:59"
+      "&date=gte." + fromDate + "&date=lte." + toDate
     ),
     fetch(SUPABASE_URL + "/rest/v1/job_table?select=job_code", { headers: authHeaders() })
   ]);
@@ -259,9 +246,8 @@ async function generate(){
     // etc. in the control table. Matches summary-report and grand-total-report.
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return false;
 
-    // FIX 2: Use operational-day date (night-shift boundary at 06:00).
-    // Mirrors the BigQuery view's Event_Date column.
-    const opDate = operationalDate(r);
+    // FIX 2: Use date_col (operator-recorded date = BigQuery Event_Date).
+    const opDate = getRecordDate(r);
     if(!opDate || opDate < startDate || opDate > endDate) return false;
 
     // Department filter: match the actual department column value.

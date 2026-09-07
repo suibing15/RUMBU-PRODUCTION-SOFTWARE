@@ -180,7 +180,7 @@ function searchStaffByQuery(role, query){
     let action;
     if(!hasAccess) action = `<span style="color:var(--muted);">No login yet</span>`;
     else if(isAssigned) action = `<span style="color:var(--ok);">✔ Already assigned</span>`;
-    else action = `<button onclick="confirmAddStaff('${role}', ${e.linked_profile_id})" style="padding:3px 10px;font-size:11px;">Add</button>`;
+    else action = `<button onclick="confirmAddStaff('${role}', '${e.linked_profile_id}')" style="padding:3px 10px;font-size:11px;">Add</button>`;
     return `<div class="person-row"><span>${e.full_name} <span style="color:var(--muted);">(${e.employee_id})</span></span>${action}</div>`;
   }).join("");
 }

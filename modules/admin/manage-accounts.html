@@ -685,7 +685,7 @@ async function loadBranchDeptTree(){
       </summary>
       <div class="dept-rows">`;
     if(!depts.length){
-      html += `<p class="sub">No Departments mapped to this Branch yet.</p>`;
+      html += `<p class="sub">No Modules mapped to this Branch yet.</p>`;
     } else {
       depts.forEach(([deptId, deptName])=>{
         const cellId = "dept_" + deptId + "_in_" + b.id;
@@ -724,14 +724,14 @@ async function renameBranch(id){
 async function renameDepartment(id, cellId){
   const status = document.getElementById("branch_dept_status");
   const newName = document.getElementById(cellId).value.trim();
-  if(!newName){ status.className="status err"; status.textContent="Department name cannot be empty."; return; }
+  if(!newName){ status.className="status err"; status.textContent="Module name cannot be empty."; return; }
 
   status.className = "status"; status.textContent = "Saving...";
   try{
     const { error } = await sb.from("modules").update({ name: newName }).eq("id", id);
     if(error) throw error;
-    status.className = "status ok"; status.textContent = "✅ Department renamed.";
-    await logActivity("department_renamed", ME.username + " renamed a Department to \"" + newName + "\"");
+    status.className = "status ok"; status.textContent = "✅ Module renamed.";
+    await logActivity("department_renamed", ME.username + " renamed a Module to \"" + newName + "\"");
     await loadBranchDeptTree();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
@@ -1146,14 +1146,14 @@ async function deleteBranch(id, name){
 }
 
 async function deleteDepartment(id, name){
-  if(!confirm("Delete Department \"" + name + "\"?\n\nThis will fail if it still has pages registered under it.")) return;
+  if(!confirm("Delete Module \"" + name + "\"?\n\nThis will fail if it still has pages registered under it.")) return;
   try{
     const { error } = await sb.from("modules").delete().eq("id", id);
     if(error) throw error;
-    await logActivity("department_deleted", ME.username + " deleted Department \"" + name + "\"");
+    await logActivity("department_deleted", ME.username + " deleted Module \"" + name + "\"");
     await loadBranchDeptTree();
   }catch(e){
-    alert("❌ " + e.message + "\n\nThis Department is likely still holding registered pages.");
+    alert("❌ " + e.message + "\n\nThis Module is likely still holding registered pages.");
   }
 }
 

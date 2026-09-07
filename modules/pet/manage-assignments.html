@@ -119,54 +119,22 @@ async function loadAll(){
     <div class="assign-card">
       <h4>Fillers <span style="font-weight:400;color:var(--muted);">(who fills this stage)</span></h4>
       <div id="fillerList">${renderPersonList(fillers||[], 'filler')}</div>
-      ${pinSearchHtml('filler')}
-      ${renderBranchEmployeeList('filler')}
+      ${searchHtml('filler')}
     </div>
     <div class="assign-card">
       <h4>Approvers <span style="font-weight:400;color:var(--muted);">(ALL must approve)</span></h4>
       <div id="approverList">${renderPersonList(approvers||[], 'approver')}</div>
-      ${pinSearchHtml('approver')}
-      ${renderBranchEmployeeList('approver')}
+      ${searchHtml('approver')}
     </div>`;
 }
 
-// Browsable list of every employee tied to the selected Branch — lets an
-// admin pick straight from the roster instead of needing to know each
-// person's exact Employee Code. Anyone without system access yet is shown
-// but can't be Added until they're granted one (Employee Directory).
-function renderBranchEmployeeList(role){
-  const section = document.getElementById("sectionSel").value;
-  if(!section) return `<p style="font-size:12px;color:var(--muted);margin-top:12px;">Select a Branch to see its employees.</p>`;
-
-  const already = role==='filler' ? FILLER_IDS : APPROVER_IDS;
-  const branchEmps = ALL_STAFF.filter(e=>e.branch===section).sort((a,b)=>a.full_name.localeCompare(b.full_name));
-  if(!branchEmps.length){
-    return `<p style="font-size:12px;color:var(--muted);margin-top:12px;">No employees on record for ${section} yet.</p>`;
-  }
-
-  return `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px;">
-    <label style="margin:0 0 6px;">All ${section} Employees</label>
-    <div style="max-height:220px;overflow-y:auto;">
-      ${branchEmps.map(e=>{
-        const hasAccess = !!e.linked_profile_id;
-        const isAssigned = hasAccess && already.has(e.linked_profile_id);
-        let action;
-        if(!hasAccess) action = `<span style="font-size:11px;color:var(--muted);">No login yet</span>`;
-        else if(isAssigned) action = `<span style="font-size:11px;color:var(--ok);">✔ Assigned</span>`;
-        else action = `<button onclick="confirmAddStaff('${role}', ${e.linked_profile_id})" style="padding:3px 10px;font-size:11px;">Add</button>`;
-        return `<div class="person-row"><span>${e.full_name} <span style="color:var(--muted);">(${e.employee_id})</span></span>${action}</div>`;
-      }).join("")}
-    </div>
-  </div>`;
-}
-
-function pinSearchHtml(role){
+function searchHtml(role){
   return `
     <div style="margin-top:10px;">
-      <label style="margin:0 0 4px;">Employee Code (PIN)</label>
-      <input type="text" id="${role}Pin" placeholder="Type employee code, e.g. RIG-0142"
-        oninput="searchStaffByPin('${role}', this.value)" onkeydown="if(event.key==='Enter') event.preventDefault();" autocomplete="off">
-      <div id="${role}PinResult" style="font-size:12.5px;margin-top:6px;min-height:18px;"></div>
+      <label style="margin:0 0 4px;">Search by Name or Employee ID</label>
+      <input type="text" id="${role}Search" placeholder="Start typing a name or code..."
+        oninput="searchStaffByQuery('${role}', this.value)" onkeydown="if(event.key==='Enter') event.preventDefault();" autocomplete="off">
+      <div id="${role}SearchResults" style="font-size:12.5px;margin-top:6px;"></div>
     </div>`;
 }
 
@@ -185,36 +153,36 @@ function renderPersonList(list, role){
 // currently selected Branch), then click Add. The box clears itself after
 // each successful add so the next PIN can be typed straight away — repeat
 // as many times as needed to add several people, one at a time.
-function searchStaffByPin(role, code){
+// Type a name or Employee ID; matching results (scoped to the currently
+// selected Branch) appear below, each with its own Add button — no full
+// list sitting on screen, nothing shows until you actually type something.
+function searchStaffByQuery(role, query){
   const section = document.getElementById("sectionSel").value;
-  const resultEl = document.getElementById(role+"PinResult");
-  code = code.trim();
-  if(!code){ resultEl.innerHTML = ""; return; }
+  const resultEl = document.getElementById(role+"SearchResults");
+  query = query.trim().toLowerCase();
+  if(!query){ resultEl.innerHTML = ""; return; }
+  if(!section){ resultEl.innerHTML = `<span style="color:var(--bad);">Select a Branch first.</span>`; return; }
 
-  const match = ALL_STAFF.find(e => (e.employee_id||"").toLowerCase() === code.toLowerCase());
-  if(!match){
-    resultEl.innerHTML = `<span style="color:var(--bad);">No employee found with that code.</span>`;
-    return;
-  }
-  if(!section){
-    resultEl.innerHTML = `<span style="color:var(--bad);">Select a Branch first.</span>`;
-    return;
-  }
-  if(match.branch !== section){
-    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} belongs to ${match.branch||"no branch set"}, not ${section}.</span>`;
-    return;
-  }
-  if(!match.linked_profile_id){
-    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} has no system access yet — grant it in Employee Directory first.</span>`;
-    return;
-  }
   const already = role==='filler' ? FILLER_IDS : APPROVER_IDS;
-  if(already.has(match.linked_profile_id)){
-    resultEl.innerHTML = `<span style="color:var(--bad);">${match.full_name} is already assigned as a ${role} here.</span>`;
+  const matches = ALL_STAFF.filter(e =>
+    e.branch === section &&
+    ((e.full_name||"").toLowerCase().includes(query) || (e.employee_id||"").toLowerCase().includes(query))
+  ).slice(0, 8);
+
+  if(!matches.length){
+    resultEl.innerHTML = `<span style="color:var(--muted);">No ${section} employee matches "${query}".</span>`;
     return;
   }
-  resultEl.innerHTML = `<span style="color:var(--ok);">${match.full_name} (${match.employee_id})</span>
-    <button onclick="confirmAddStaff('${role}', ${match.linked_profile_id})" style="margin-left:8px;padding:4px 12px;font-size:11px;">Add</button>`;
+
+  resultEl.innerHTML = matches.map(e=>{
+    const hasAccess = !!e.linked_profile_id;
+    const isAssigned = hasAccess && already.has(e.linked_profile_id);
+    let action;
+    if(!hasAccess) action = `<span style="color:var(--muted);">No login yet</span>`;
+    else if(isAssigned) action = `<span style="color:var(--ok);">✔ Already assigned</span>`;
+    else action = `<button onclick="confirmAddStaff('${role}', ${e.linked_profile_id})" style="padding:3px 10px;font-size:11px;">Add</button>`;
+    return `<div class="person-row"><span>${e.full_name} <span style="color:var(--muted);">(${e.employee_id})</span></span>${action}</div>`;
+  }).join("");
 }
 
 async function confirmAddStaff(role, profileId){
@@ -223,9 +191,9 @@ async function confirmAddStaff(role, profileId){
   const table = role==='filler' ? "pet_stage_fillers" : "pet_stage_approvers";
   const { error } = await sb.from(table).insert({ section, stage: CURRENT_STAGE, profile_id: profileId, assigned_by: ME.username });
   if(error){ st.style.color="var(--bad)"; st.textContent="Error: "+error.message; return; }
-  st.style.color="var(--ok)"; st.textContent="Assignment saved. Enter the next code to keep adding.";
+  st.style.color="var(--ok)"; st.textContent="Assignment saved. Keep searching to add another.";
   await loadAll();
-  document.getElementById(role+"Pin")?.focus();
+  document.getElementById(role+"Search")?.focus();
   setTimeout(()=>{ st.textContent=""; }, 2500);
 }
 

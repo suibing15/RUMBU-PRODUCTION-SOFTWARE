@@ -450,7 +450,7 @@ async function generate(){
     byJob[j].downtime += minutesBetween(stop, finish);
     byJob[j].repair += minutesBetween(start, finish);
     byJob[j].waiting += minutesBetween(stop, start);
-    byJob[j].est += extractNumber(r.extimated_time);
+    byJob[j].est += Math.ceil(extractNumber(r.extimated_time)); // ceil per-row to match GAS
   });
   const jobData = Object.values(byJob).map(r=>({ ...r, eff: r.repair>0 ? (r.est/r.repair)*100 : 0 }))
     .sort((a,b)=>b.count-a.count);
@@ -530,12 +530,13 @@ async function generate(){
     const down = minutesBetween(stop, finish), rep = minutesBetween(start, finish), wait = minutesBetween(stop, start);
     const est = extractNumber(r.extimated_time);
 
-    countWO++; sumDown+=down; sumRep+=rep; sumWait+=wait; sumEst+=est;
-    gd+=down; gr+=rep; gw+=wait; ge+=est;
+    const estC = Math.ceil(est); // ceil per-row to match GAS
+    countWO++; sumDown+=down; sumRep+=rep; sumWait+=wait; sumEst+=estC;
+    gd+=down; gr+=rep; gw+=wait; ge+=estC;
 
     const label = [asset, r.discription, r.part_needed].filter(Boolean).join(" / ") + (job ? " / "+job : "");
     html += `<tr><td>${label}</td><td>${r.work_order||""}</td><td>${r.names||""}</td><td>${r.date_col||""}</td>` +
-      `<td>${down}</td><td>${rep}</td><td>${wait}</td><td>${est}</td></tr>`;
+      `<td>${down}</td><td>${rep}</td><td>${wait}</td><td>${Math.ceil(est)}</td></tr>`;
   });
   if(currentAsset !== "") html += subtotalRow();
 

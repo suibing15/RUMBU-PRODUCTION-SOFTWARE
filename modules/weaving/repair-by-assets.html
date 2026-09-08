@@ -56,7 +56,7 @@
 const SUPABASE_URL = "https://betfhunzmhtdzgvufmfk.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AfDp1FlHghu9TOfqEUj20Q_Pke7GlTp";
 
-let CTRL_ROWS = [], JOB_TABLE_CODES = new Set(); CTRL_ROWS.forEach(normalizeControlRow);
+let CTRL_ROWS = []; CTRL_ROWS.forEach(normalizeControlRow);
 
 function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }; }
 function parseDT(v){ const d=new Date(v); return isNaN(d)?null:d; }
@@ -97,15 +97,8 @@ async function init(){
   document.getElementById("startDate").value = past.toISOString().slice(0,10);
 
   try{
-    const [ctrlRes, jobRes] = await Promise.all([
-      fetchAllRows("control","*"),
-      fetch(SUPABASE_URL + "/rest/v1/job_table?select=job_code", { headers: authHeaders() })
-    ]);
-    CTRL_ROWS = ctrlRes; CTRL_ROWS.forEach(normalizeControlRow);
-    if(jobRes.ok){
-      const jobRows = await jobRes.json();
-      JOB_TABLE_CODES = new Set(jobRows.map(r => r.job_code));
-    }
+    CTRL_ROWS = await fetchAllRows("control","*");
+    CTRL_ROWS.forEach(normalizeControlRow);
     // Populate Department dropdown from distinct values in loaded data
     const depts = ["All", ...new Set(CTRL_ROWS.map(r=>(r.department||"").trim()).filter(Boolean)).values()].sort();
     const deptSel = document.getElementById("department");
@@ -122,7 +115,7 @@ async function init(){
     secs.forEach(s=>{ if(s!=="All"){ const o=document.createElement("option"); o.value=s; o.textContent=s; secSel.appendChild(o); }});
 
     status.style.color="#1d8a4e";
-    status.textContent = "Connected. control: " + CTRL_ROWS.length + " rows, job_table codes: " + JOB_TABLE_CODES.size + ".";
+    status.textContent = "Connected. control: " + CTRL_ROWS.length + " rows.";
   }catch(e){
     status.style.color="#c0392b";
     status.textContent = "Could not read data: " + (e.message||e);
@@ -139,9 +132,8 @@ function generate(){
   const section = document.getElementById("section").value;
   if(!startDate || !endDate){ alert("Please select both dates."); return; }
 
-  // NOTE: this report INCLUDES ONLY job codes that ARE in job_table — the
-  // opposite of the exclusion pattern used elsewhere, preserved exactly as
-  // written in the original script.
+  // NOTE: this report shows ALL job codes — GAS has no job_code filter.
+  // Only date range, department, assets, shift, section filters apply.
   const rows = CTRL_ROWS.filter(r=>{
     if(r.date_col < startDate || r.date_col > endDate) return false;
     if(department !== "All" && (r.department||"").trim() !== department) return false;
@@ -153,7 +145,6 @@ function generate(){
       if(section === "Rumbu" && sec.includes("MAMASANNU")) return false;
       if(section !== "MamaSannu" && section !== "Rumbu" && sec !== section.toUpperCase().trim()) return false;
     }
-    if(!JOB_TABLE_CODES.has(r.job_code)) return false;
     const stop = parseDT(r.stop_time), start_t = parseDT(r.starting_time), finish = parseDT(r.finish_time);
     return !!(stop && start_t && finish);
   });

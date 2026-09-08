@@ -274,6 +274,9 @@
     <p class="sub">Rename or delete a real Branch. This no longer gates which Modules an Admin or User can be given — that's set entirely in Manage Role now, independent of Branch.</p>
     <div id="branchesFlatWrap"></div>
     <div class="status" id="branch_dept_status"></div>
+    <p class="sub" style="margin-top:14px;">If Save reports "no rows updated," ask your developer to run:<br>
+      <code>create policy "Update app_sections" on public.app_sections for update to authenticated using (true) with check (true);</code>
+    </p>
   </div>
 
   <div class="tab-content hidden" id="tab-manage-departments">
@@ -305,6 +308,9 @@
     <p class="sub">Rename or delete a real Module (sidebar folder — e.g. "Overtime", "PET Collection"). Independent of Branch now — a Module either exists or it doesn't; who can use it is set entirely in Manage Role.</p>
     <div id="modulesFlatWrap"></div>
     <div class="status" id="module_dept_status"></div>
+    <p class="sub" style="margin-top:14px;">If Save reports "no rows updated," ask your developer to run:<br>
+      <code>create policy "Update modules" on public.modules for update to authenticated using (true) with check (true);</code>
+    </p>
   </div>
 </div>
 
@@ -737,14 +743,22 @@ async function renameBranch(id){
 
   status.className = "status"; status.textContent = "Saving...";
   try{
-    const { error } = await sb.from("app_sections").update({ name: newName }).eq("id", id);
+    // .select() after update lets us tell the difference between "genuinely
+    // saved" and "silently blocked by a missing UPDATE policy" — Postgres/
+    // PostgREST does NOT treat 0-rows-affected as an error by default, so
+    // without this check a permissions problem looks identical to success.
+    const { data: updated, error } = await sb.from("app_sections").update({ name: newName }).eq("id", id).select();
     if(error) throw error;
+    if(!updated || !updated.length){
+      throw new Error("No rows were updated. This Branch likely can't be changed due to a missing UPDATE permission (RLS policy) on app_sections — see the note below the list.");
+    }
     status.className = "status ok"; status.textContent = "✅ Branch renamed.";
     await logActivity("branch_renamed", ME.username + " renamed a Branch to \"" + newName + "\"");
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
     buildSectionDisplayNames();
     await loadBranchesFlat();
+    refreshAllBranchDropdowns();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
   }
@@ -757,8 +771,11 @@ async function renameDepartment(id, cellId){
 
   status.className = "status"; status.textContent = "Saving...";
   try{
-    const { error } = await sb.from("modules").update({ name: newName }).eq("id", id);
+    const { data: updated, error } = await sb.from("modules").update({ name: newName }).eq("id", id).select();
     if(error) throw error;
+    if(!updated || !updated.length){
+      throw new Error("No rows were updated. This Module likely can't be changed due to a missing UPDATE permission (RLS policy) on modules — see the note below the list.");
+    }
     status.className = "status ok"; status.textContent = "✅ Module renamed.";
     await logActivity("department_renamed", ME.username + " renamed a Module to \"" + newName + "\"");
     await loadModulesFlat();
@@ -784,7 +801,7 @@ async function addBranch(){
     const { data: secData } = await sb.from("app_sections").select("id,name").order("name");
     ALL_SECTIONS = secData || [];
     buildSectionDisplayNames();
-    populateBranchModulesDropdown();
+    refreshAllBranchDropdowns();
   }catch(e){
     status.className = "status err"; status.textContent = "❌ " + e.message;
   }
@@ -926,6 +943,62 @@ function populateDeptBranchSelect(){
   sel.innerHTML = '<option value="">— select a Branch —</option>' +
     ALL_SECTIONS.map(s=>`<option value="${s.name}">${s.name}</option>`).join("");
   if(prev) sel.value = prev;
+}
+
+// Refreshes EVERY branch <select> on this page from the current
+// ALL_SECTIONS — call this after ANY branch add, rename, or delete.
+// Before this existed, most of these dropdowns only ever populated once
+// ("if it's empty, fill it") and silently went stale — a deleted branch
+// kept showing up everywhere except whichever single list had just
+// reloaded. Each dropdown keeps its previous selection if it's still valid.
+function refreshAllBranchDropdowns(){
+  BRANCH_OPTIONS = ALL_SECTIONS.map(s=>s.name);
+  populateDeptBranchSelect();
+
+  // Add Employee (Super Admin) — full Branch list
+  const newEmpBranch = document.getElementById("new_emp_branch");
+  if(newEmpBranch){
+    const prev = newEmpBranch.value;
+    newEmpBranch.innerHTML = '<option value="">— none —</option>' + BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join("");
+    if(BRANCH_OPTIONS.includes(prev)) newEmpBranch.value = prev;
+  }
+
+  // Add Employee (Admin) — restricted to their own Branch(es)
+  const adminNewEmpBranch = document.getElementById("admin_new_emp_branch");
+  if(adminNewEmpBranch){
+    const prev = adminNewEmpBranch.value;
+    adminNewEmpBranch.innerHTML = '<option value="">— select —</option>' + (ME.sectionNames||[]).map(b=>`<option value="${b}">${b}</option>`).join("");
+    if((ME.sectionNames||[]).includes(prev)) adminNewEmpBranch.value = prev;
+  }
+
+  // Employee Directory filter (Super Admin) — full Branch list
+  const empBranchFilter = document.getElementById("emp_branch_filter");
+  if(empBranchFilter){
+    const prev = empBranchFilter.value;
+    empBranchFilter.innerHTML = '<option value="all">All</option>' +
+      BRANCH_OPTIONS.map(b=>`<option value="${b}">${b}</option>`).join("") +
+      '<option value="__unset__">— Not set —</option>';
+    empBranchFilter.value = (prev && (prev==="all" || prev==="__unset__" || BRANCH_OPTIONS.includes(prev))) ? prev : "all";
+  }
+
+  // Employee Directory filter (Admin) — restricted to their own Branch(es)
+  const adminEmpBranchFilter = document.getElementById("admin_emp_branch_filter");
+  if(adminEmpBranchFilter && ME.role === "admin"){
+    const prev = adminEmpBranchFilter.value;
+    adminEmpBranchFilter.innerHTML = '<option value="all">All my Branches</option>' +
+      (ME.sectionNames||[]).map(b=>`<option value="${b}">${b}</option>`).join("");
+    adminEmpBranchFilter.value = (prev && (prev==="all" || (ME.sectionNames||[]).includes(prev))) ? prev : "all";
+  }
+
+  // Bulk Add Employee branch pickers — previously never populated at all.
+  ["bulk_branch","admin_bulk_branch"].forEach(id=>{
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    const prev = sel.value;
+    const options = id.startsWith("admin_") ? (ME.sectionNames||[]) : BRANCH_OPTIONS;
+    sel.innerHTML = '<option value="">— select —</option>' + options.map(b=>`<option value="${b}">${b}</option>`).join("");
+    if(options.includes(prev)) sel.value = prev;
+  });
 }
 
 // ============================================================
@@ -1169,6 +1242,7 @@ async function deleteBranch(id, name){
     ALL_SECTIONS = secData || [];
     buildSectionDisplayNames();
     await loadBranchesFlat();
+    refreshAllBranchDropdowns();
   }catch(e){
     alert("❌ " + e.message + "\n\nThis Branch is likely still assigned to an account.");
   }

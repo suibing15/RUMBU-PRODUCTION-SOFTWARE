@@ -115,7 +115,7 @@ async function loadData(){
     let html = "";
     rows.forEach(r=>{
       html += `<tr><td>${r.date_col||""}</td><td>${r.recommendation||""}</td><td>${r.section||""}</td>` +
-        `<td><button class="btn-sm btn-danger" onclick="deleteRow(${r.eid})">Delete</button></td></tr>`;
+        `<td><button class="btn-sm btn-danger" onclick="deleteRow(${r.id})">Delete</button></td></tr>`;
     });
     document.getElementById("tableBody").innerHTML = html;
   }catch(e){
@@ -124,13 +124,13 @@ async function loadData(){
   }
 }
 
-async function deleteRow(eid){
+async function deleteRow(id){
   if(!confirm("Delete this recommendation?")) return;
   try{
     // Only allow deleting records within the last 7 days, matching the
     // original script's own protection rule.
     const cutoff = daysAgoISO(7);
-    const url = SUPABASE_URL + "/rest/v1/recommendation?eid=eq." + eid + "&date_col=gte." + cutoff;
+    const url = SUPABASE_URL + "/rest/v1/recommendation?id=eq." + id + "&date_col=gte." + cutoff;
     const res = await fetch(url, { method: "delete", headers: authHeaders() });
     if(!res.ok) throw new Error("HTTP " + res.status + " - " + await res.text());
     alert("Deleted Successfully");

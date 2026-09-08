@@ -179,7 +179,7 @@ document.getElementById('load').addEventListener('click', ()=>{
   renderTimeline(rows);
 });
 
-function parseTs(t){ return new Date(t).getTime(); }
+function parseTs(t){ return new Date((t||"").replace(/Z$|\+00:00$/, "")).getTime(); }
 
 function renderTimeline(rows){
   if(!rows || rows.length===0){

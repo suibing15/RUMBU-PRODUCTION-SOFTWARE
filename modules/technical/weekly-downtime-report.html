@@ -70,7 +70,7 @@ function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "
 function parseDT(v){ const d=new Date(v); return isNaN(d)?null:d; }
 function minutesBetween(a,b){ return (!a||!b)?0:Math.trunc((b-a)/60000); }
 function extractNumber(v){ if(v==null) return 0; const m=String(v).match(/\d+(\.\d+)?/); return m?Number(m[0]):0; }
-function fmtDate(d){ return d.toISOString().slice(0,10); }
+function fmtDate(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 
 // ---- Exact department -> job-code map from the original script. ----
 // NOTE: this report filters by Job_Code membership in this map, NOT by a
@@ -163,7 +163,7 @@ async function fetchAllRows(table, select, query){
   let all = [], offset = 0; const pageSize = 1000; const q = query||"";
   for(let guard=0; guard<500; guard++){
     const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset + "-" + (offset+pageSize-1) });
-    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q, { headers });
+    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q + "&order=id.asc", { headers });
     if(!res.ok) throw new Error(table + ": HTTP " + res.status);
     const batch = await res.json();
     all = all.concat(batch);
@@ -224,14 +224,16 @@ function filterRows(range, department, shift, section){
   const jobCodes = getJobCodesByDepartment(department);
   // Normalize both sides: strips .0/.00 float artifacts, uppercases, trims whitespace.
   // Matches old AppScript's UPPER(TRIM(REGEXP_REPLACE(CAST(Job_Code AS STRING), r'\.0+$', '')))
-  const jobSet = department === "All" ? null : new Set(jobCodes.map(normalizeCode));
+  // Always build the allow-set from department codes (matches GAS buildJobCodeFilter behaviour).
+  // When dept="All" this includes ALL known codes, naturally excluding unlisted ones (OPR01, BR01, LR01, etc.)
+  const jobSet = new Set(jobCodes.map(normalizeCode));
   return CTRL_ROWS.filter(r=>{
-    if(!r.stop_time || !r.finish_time) return false;
+    if(!r.stop_time || !r.starting_time || !r.finish_time) return false; // matches GAS WHERE ... IS NOT NULL
     // Use the date from mc_stoppage_time (matches old script's DATE(MC_Stoppage_Time) BETWEEN)
     const stopDate = r.stop_time ? r.stop_time.slice(0,10) : r.date_col;
     if(stopDate < range.startDate || stopDate > range.endDate) return false;
     // Job code: normalize both sides
-    if(jobSet && !jobSet.has(normalizeCode(r.job_code))) return false;
+    if(!jobSet.has(normalizeCode(r.job_code))) return false; // exclude codes not in any known department
     // Shift: case-insensitive
     if(shift !== "All" && (r.shift||"").trim().toUpperCase() !== shift.toUpperCase()) return false;
     // Section: match old AppScript's LIKE logic exactly

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trip Dispatch &amp; Closure — Logistics</title>
+<link rel="stylesheet" href="../../styles.css">
+<script>
+  (function(){ try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("rumbu_theme")||"navy"); }catch(e){} })();
+  window.addEventListener("message",function(e){ if(e.data&&e.data.rumbuTheme) document.documentElement.setAttribute("data-theme",e.data.rumbuTheme); });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../auth.js"></script>
+<script src="review-modal.js"></script>
+<style>
+  body{padding:18px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  label{font-size:12px;font-weight:700;display:block;margin:10px 0 4px;color:var(--muted);}
+  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;background:var(--card);color:var(--text);}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .queue-row{border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;}
+  .hidden{display:none;}
+  .btn-ghost{background:var(--bg);color:var(--heading);border:1px solid var(--line);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <button onclick="(window.parent&&window.parent.closeModule)?window.parent.closeModule():(window.location.href='../../index.html')" style="max-width:200px;margin-bottom:12px;background:var(--accent);color:var(--logo-fg);">&larr; Back</button>
+  <div id="connStatus" style="font-size:12px;font-weight:700;text-align:center;margin-bottom:10px;color:var(--muted);">Loading...</div>
+
+  <div class="card-panel">
+    <h3 style="color:var(--heading);margin:0 0 4px;">Dispatch Queue — Approved Trips</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Record Starting Mileage and Fuel Issued to dispatch the vehicle.</p>
+    <div id="dispatchQueue"></div>
+  </div>
+
+  <div class="card-panel">
+    <h3 style="color:var(--heading);margin:0 0 4px;">Closure Queue — Dispatched Trips</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Record Ending Mileage and Trip Expenses to close the trip out.</p>
+    <div id="closureQueue"></div>
+  </div>
+
+  <!-- Dispatch form -->
+  <div class="card-panel hidden" id="dispatchFormPanel">
+    <h4 style="margin-top:0;" id="dispatchFormTitle">Dispatch Trip</h4>
+    <input type="hidden" id="disp_trip_id">
+    <div class="form-row">
+      <div><label>Starting Mileage (km) *</label><input type="number" step="0.1" id="disp_start_mileage"></div>
+      <div><label>Fuel Issued (litres) *</label><input type="number" step="0.1" id="disp_fuel"></div>
+    </div>
+    <button onclick="submitDispatch()" style="margin-top:10px;">Confirm Dispatch</button>
+    <button class="btn-ghost" onclick="document.getElementById('dispatchFormPanel').classList.add('hidden');">Cancel</button>
+    <div class="status" id="dispatchFormStatus"></div>
+  </div>
+
+  <!-- Closure form -->
+  <div class="card-panel hidden" id="closureFormPanel">
+    <h4 style="margin-top:0;" id="closureFormTitle">Close Out Trip</h4>
+    <input type="hidden" id="clos_trip_id">
+    <div class="form-row">
+      <div><label>Ending Mileage (km) *</label><input type="number" step="0.1" id="clos_end_mileage" oninput="computeDistance()"></div>
+      <div><label>Distance Travelled (km)</label><input type="number" id="clos_distance" readonly></div>
+    </div>
+    <div class="form-row">
+      <div><label>Trip Expenses (NGN) *</label><input type="number" step="0.01" id="clos_expenses"></div>
+      <div><label>Closure Remarks</label><input id="clos_remarks"></div>
+    </div>
+    <button onclick="submitClosure()" style="margin-top:10px;">Confirm Closure</button>
+    <button class="btn-ghost" onclick="document.getElementById('closureFormPanel').classList.add('hidden');">Cancel</button>
+    <div class="status" id="closureFormStatus"></div>
+  </div>
+</div>
+
+<script>
+let ME = null;
+let DISPATCH_DATA = [];
+let CLOSURE_DATA = [];
+
+async function init(){
+  const status = document.getElementById("connStatus");
+  try{
+    ME = await requireAuth("../../login.html");
+    if(!ME) return;
+    await Promise.all([loadDispatchQueue(), loadClosureQueue()]);
+    status.style.color="var(--ok)"; status.textContent="Connected.";
+  }catch(e){
+    status.style.color="var(--bad)"; status.textContent="Error: "+e.message;
+  }
+}
+
+async function loadDispatchQueue(){
+  const { data, error } = await sb.from("logistics_trips")
+    .select("*, logistics_vehicles(registration_number), logistics_drivers(employees(full_name))")
+    .eq("status","approved").order("trip_date");
+  const wrap = document.getElementById("dispatchQueue");
+  if(error){ wrap.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ wrap.innerHTML = "<p style='color:var(--muted);font-size:13px;'>No trips awaiting dispatch.</p>"; return; }
+  DISPATCH_DATA = data;
+  wrap.innerHTML = data.map(t=>{
+    const veh = t.logistics_vehicles ? t.logistics_vehicles.registration_number : "—";
+    const drv = (t.logistics_drivers && t.logistics_drivers.employees) ? t.logistics_drivers.employees.full_name : "—";
+    return `<div class="queue-row">
+      <b>${t.destination}</b> — ${t.requesting_department}
+      <div style="font-size:12px;color:var(--muted);">${t.trip_date} | Vehicle: ${veh} | Driver: ${drv}</div>
+      <button style="margin-top:8px;" onclick="openDispatchForm(${t.id})">Dispatch</button>
+    </div>`;
+  }).join("");
+}
+
+async function loadClosureQueue(){
+  const { data, error } = await sb.from("logistics_trips")
+    .select("*, logistics_vehicles(registration_number), logistics_drivers(employees(full_name))")
+    .eq("status","dispatched").order("trip_date");
+  const wrap = document.getElementById("closureQueue");
+  if(error){ wrap.innerHTML = "Error: " + error.message; return; }
+  if(!data || !data.length){ wrap.innerHTML = "<p style='color:var(--muted);font-size:13px;'>No dispatched trips awaiting closure.</p>"; return; }
+  CLOSURE_DATA = data;
+  wrap.innerHTML = data.map(t=>{
+    const veh = t.logistics_vehicles ? t.logistics_vehicles.registration_number : "—";
+    const drv = (t.logistics_drivers && t.logistics_drivers.employees) ? t.logistics_drivers.employees.full_name : "—";
+    return `<div class="queue-row">
+      <b>${t.destination}</b> — ${t.requesting_department}
+      <div style="font-size:12px;color:var(--muted);">${t.trip_date} | Vehicle: ${veh} | Driver: ${drv} | Starting Mileage: ${t.starting_mileage} | Fuel Issued: ${t.fuel_issued}L</div>
+      <button style="margin-top:8px;" onclick="openClosureForm(${t.id})">Close Out</button>
+    </div>`;
+  }).join("");
+}
+
+function openDispatchForm(tripId){
+  const t = DISPATCH_DATA.find(x=>x.id===tripId);
+  if(!t) return;
+  document.getElementById("dispatchFormPanel").classList.remove("hidden");
+  document.getElementById("dispatchFormTitle").textContent = "Dispatch — " + t.destination;
+  document.getElementById("disp_trip_id").value = t.id;
+  document.getElementById("disp_start_mileage").value = "";
+  document.getElementById("disp_fuel").value = "";
+  document.getElementById("dispatchFormStatus").textContent = "";
+  document.getElementById("dispatchFormPanel").scrollIntoView({behavior:"smooth"});
+}
+
+async function submitDispatch(){
+  const status = document.getElementById("dispatchFormStatus");
+  const tripId = document.getElementById("disp_trip_id").value;
+  const startMileage = document.getElementById("disp_start_mileage").value;
+  const fuel = document.getElementById("disp_fuel").value;
+  if(startMileage===""){ status.className="status err"; status.textContent="Starting Mileage is required."; return; }
+  if(fuel===""){ status.className="status err"; status.textContent="Fuel Issued is required."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const { error } = await sb.from("logistics_trips").update({
+      starting_mileage: Number(startMileage),
+      fuel_issued: Number(fuel),
+      status: "dispatched",
+      dispatched_at: new Date().toISOString(),
+      dispatched_by: ME.id
+    }).eq("id", tripId);
+    if(error) throw error;
+    status.className="status ok"; status.textContent="✅ Trip dispatched.";
+    await Promise.all([loadDispatchQueue(), loadClosureQueue()]);
+    setTimeout(()=>{ document.getElementById("dispatchFormPanel").classList.add("hidden"); }, 700);
+  }catch(e){
+    status.className="status err"; status.textContent="❌ " + e.message;
+  }
+}
+
+function computeDistance(){
+  const t = CLOSURE_DATA.find(x=>x.id===Number(document.getElementById("clos_trip_id").value));
+  const end = parseFloat(document.getElementById("clos_end_mileage").value);
+  if(!t || isNaN(end)){ document.getElementById("clos_distance").value = ""; return; }
+  document.getElementById("clos_distance").value = (end - Number(t.starting_mileage||0)).toFixed(1);
+}
+
+function openClosureForm(tripId){
+  const t = CLOSURE_DATA.find(x=>x.id===tripId);
+  if(!t) return;
+  document.getElementById("closureFormPanel").classList.remove("hidden");
+  document.getElementById("closureFormTitle").textContent = "Close Out — " + t.destination;
+  document.getElementById("clos_trip_id").value = t.id;
+  document.getElementById("clos_end_mileage").value = "";
+  document.getElementById("clos_distance").value = "";
+  document.getElementById("clos_expenses").value = "";
+  document.getElementById("clos_remarks").value = "";
+  document.getElementById("closureFormStatus").textContent = "";
+  document.getElementById("closureFormPanel").scrollIntoView({behavior:"smooth"});
+}
+
+async function submitClosure(){
+  const status = document.getElementById("closureFormStatus");
+  const tripId = document.getElementById("clos_trip_id").value;
+  const t = CLOSURE_DATA.find(x=>x.id===Number(tripId));
+  const endMileage = document.getElementById("clos_end_mileage").value;
+  const expenses = document.getElementById("clos_expenses").value;
+  if(endMileage===""){ status.className="status err"; status.textContent="Ending Mileage is required."; return; }
+  if(Number(endMileage) < Number(t?.starting_mileage||0)){ status.className="status err"; status.textContent="Ending Mileage cannot be less than Starting Mileage ("+t.starting_mileage+")."; return; }
+  if(expenses===""){ status.className="status err"; status.textContent="Trip Expenses is required (enter 0 if none)."; return; }
+
+  status.className="status"; status.textContent="Saving...";
+  try{
+    const { error } = await sb.from("logistics_trips").update({
+      ending_mileage: Number(endMileage),
+      distance_travelled: Number(endMileage) - Number(t.starting_mileage||0),
+      trip_expenses: Number(expenses),
+      closure_remarks: document.getElementById("clos_remarks").value.trim() || null,
+      status: "completed",
+      closed_at: new Date().toISOString(),
+      closed_by: ME.id
+    }).eq("id", tripId);
+    if(error) throw error;
+    status.className="status ok"; status.textContent="✅ Trip closed out.";
+    await loadClosureQueue();
+    setTimeout(()=>{ document.getElementById("closureFormPanel").classList.add("hidden"); }, 700);
+  }catch(e){
+    status.className="status err"; status.textContent="❌ " + e.message;
+  }
+}
+
+init();
+</script>
+</body>
+</html>

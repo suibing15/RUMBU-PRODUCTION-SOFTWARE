@@ -67,8 +67,12 @@
 <script>
 const SECTION_DISPLAY_MAP = { "Rumbu": "Rumbu", "MamaSannu": "Mama Sannu" };
 function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }; }
-function parseDT(v){ const d=new Date(v); return isNaN(d)?null:d; }
-function secondsBetween(a,b){ return (!a||!b)?0:Math.round((b-a)/1000); }
+function parseDT(v){
+  if(v === null || v === undefined || v === "") return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+}
+function secondsBetween(a,b){ return (!a||!b)?0:Math.trunc((b-a)/1000); }
 function formatSeconds(sec){
   sec = sec || 0;
   const h = String(Math.floor(sec/3600)).padStart(2,"0");
@@ -104,11 +108,11 @@ async function init(){
     const me = await requireAuth("../../login.html");
     if(!me) return;
 
-    const mySections = (me.sectionNames && me.sectionNames.length)
-      ? me.sectionNames.map(s => SECTION_DISPLAY_MAP[s] || s)
-      : ["Rumbu","Mama Sannu"];
+    const mySectionKeys = (me.sectionNames && me.sectionNames.length)
+      ? me.sectionNames
+      : ["Rumbu","MamaSannu"];
     document.getElementById("section").innerHTML = '<option value="">All</option>' +
-      mySections.map(s=>`<option value="${s}">${s}</option>`).join("");
+      mySectionKeys.map(s=>`<option value="${s}">${SECTION_DISPLAY_MAP[s] || s}</option>`).join("");
 
     MON_ROWS = await fetchAllRows("monitoring", "");
     status.style.color = "#1d8a4e";
@@ -209,7 +213,9 @@ function fetchSummary(){
     g.Total_Waiting += secondsBetween(stop, start);
   });
 
-  const data = Object.values(groups).sort((a,b)=>b.Frequency-a.Frequency).slice(0,1000);
+  const data = Object.values(groups)
+    .sort((a,b)=> (b.Frequency - a.Frequency) || (b.Date||"").localeCompare(a.Date||""))
+    .slice(0,1000);
   renderSummary(data);
 }
 

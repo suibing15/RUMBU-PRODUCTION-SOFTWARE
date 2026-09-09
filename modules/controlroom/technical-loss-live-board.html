@@ -89,23 +89,22 @@ async function init(){
   try{
     const { shift, dateStr } = currentShiftAndDate();
 
-    // DEBUG: fetch first 5 rows with NO filter to check table exists + column names.
-    // Then fetch properly filtered rows.
-    const debugRes = await fetch(SUPABASE_URL + "/rest/v1/tracking_table?select=*&limit=5", { headers: authHeaders() });
-    const debugRows = debugRes.ok ? await debugRes.json() : [];
-    if(debugRows.length){
-      console.log("tracking_table sample row:", JSON.stringify(debugRows[0]));
-      // Show column names and sample date value in status temporarily
-      const sampleCols = Object.keys(debugRows[0]).join(", ");
-      const sampleDate = debugRows[0].date_col || debugRows[0].date || debugRows[0].Date || "(no date col found)";
-      document.getElementById("status").textContent = "DEBUG — columns: " + sampleCols + " | sample date: " + sampleDate;
-      await new Promise(r => setTimeout(r, 5000)); // show for 5 seconds
-    } else {
-      document.getElementById("status").textContent = "DEBUG — tracking_table returned 0 rows even with no filter. Table may be empty or inaccessible.";
-      await new Promise(r => setTimeout(r, 5000));
+    // Step 1: find the latest date present in tracking_table.
+    // This handles sync lag — the table may be behind today's WAT date.
+    const latestDateRes = await fetch(
+      SUPABASE_URL + "/rest/v1/tracking_table?select=date_col&order=date_col.desc&limit=1",
+      { headers: authHeaders() }
+    );
+    let effectiveDate = dateStr; // fallback to today
+    if(latestDateRes.ok){
+      const latestRows = await latestDateRes.json();
+      if(latestRows.length && latestRows[0].date_col){
+        effectiveDate = latestRows[0].date_col.slice(0,10);
+      }
     }
 
-    const trackingQ = "&date_col=eq." + dateStr;
+    // Step 2: fetch all records for that date + fetch treated table in parallel
+    const trackingQ = "&date_col=eq." + effectiveDate;
 
     const [trackingRows, treatedRes] = await Promise.all([
       fetchAllRows("tracking_table", trackingQ),
@@ -120,14 +119,15 @@ async function init(){
       TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
     }
 
-    // Count only the Technical Loss rows for display
+    // Count Technical Loss rows for the current shift
     const techLossCount = MON_ROWS.filter(r=>
       (r.job_code||"").trim().toLowerCase() === "technical loss" &&
       (r.shift||"").toLowerCase() === shift.toLowerCase()
     ).length;
 
-    status.style.color = "#7fffb0";
-    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " total rows, " + techLossCount + " Technical Loss (" + dateStr + " / " + shift + "), treated: " + TREATED_IDS.size + ".";
+    const lagNote = effectiveDate !== dateStr ? " ⚠️ sync lag — showing " + effectiveDate : "";
+    status.style.color = effectiveDate !== dateStr ? "#ffd54f" : "#7fffb0";
+    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " rows for " + effectiveDate + lagNote + " | " + techLossCount + " Technical Loss (" + shift + ") | treated: " + TREATED_IDS.size + ".";
     loadData();
   }catch(e){
     status.style.color = "#ff8a80";
@@ -140,11 +140,14 @@ function loadData(){
   const { shift, dateStr } = currentShiftAndDate();
   const now = new Date();
 
-  // Filter client-side: shift and job_code case-insensitive, shed exact, exclude treated.
-  // asset_id is the tracking_table record key (matches tracking-table-viewer pattern).
+  // Filter client-side: job_code case-insensitive, shed exact, exclude treated.
+  // If the effective date matches today, also filter by current shift.
+  // If there is a sync lag (older date), show all shifts so data is visible.
+  const effectiveDateInData = MON_ROWS.length ? (MON_ROWS[0].date_col||"").slice(0,10) : dateStr;
+  const shiftMatchesToday = effectiveDateInData === dateStr;
   const rows = MON_ROWS.filter(r=>{
     if((r.job_code||"").trim().toLowerCase() !== "technical loss") return false;
-    if((r.shift||"").toLowerCase() !== shift.toLowerCase()) return false;
+    if(shiftMatchesToday && (r.shift||"").toLowerCase() !== shift.toLowerCase()) return false;
     if(TREATED_IDS.has(String(r.asset_id))) return false;
     if(shed !== "All" && String(r.shed) !== shed) return false;
     return true;

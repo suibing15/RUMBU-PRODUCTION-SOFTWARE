@@ -66,6 +66,19 @@ function currentShiftAndDate(){
   return { shift, dateStr: y+"-"+m+"-"+d };
 }
 
+// Extract WAT date string (YYYY-MM-DD) from a mc_stoppage_time UTC string
+function watDateFromStoppage(ts){
+  if(!ts) return "";
+  // mc_stoppage_time format: "2026-07-23 03:33:25.501 UTC"
+  // Replace space+UTC with Z so JS Date parses it as UTC
+  const utcStr = ts.replace(" UTC","Z").replace(" ","T");
+  const d = new Date(utcStr);
+  if(isNaN(d)) return "";
+  // Add WAT offset (+1h) to get local Nigeria date
+  const wat = new Date(d.getTime() + 3600000);
+  return wat.getFullYear()+"-"+String(wat.getMonth()+1).padStart(2,"0")+"-"+String(wat.getDate()).padStart(2,"0");
+}
+
 let MON_ROWS = [], TREATED_IDS = new Set();
 
 // Paginated fetch matching GAS tracking_table query
@@ -89,22 +102,15 @@ async function init(){
   try{
     const { shift, dateStr } = currentShiftAndDate();
 
-    // Step 1: find the latest date present in tracking_table.
-    // This handles sync lag — the table may be behind today's WAT date.
-    const latestDateRes = await fetch(
-      SUPABASE_URL + "/rest/v1/tracking_table?select=date_col&order=date_col.desc&limit=1",
-      { headers: authHeaders() }
-    );
-    let effectiveDate = dateStr; // fallback to today
-    if(latestDateRes.ok){
-      const latestRows = await latestDateRes.json();
-      if(latestRows.length && latestRows[0].date_col){
-        effectiveDate = latestRows[0].date_col.slice(0,10);
-      }
-    }
-
-    // Step 2: fetch all records for that date + fetch treated table in parallel
-    const trackingQ = "&date_col=eq." + effectiveDate;
+    // date_col is NULL or corrupt on most records — cannot use it for filtering.
+    // Use mc_stoppage_time instead (always populated with correct UTC timestamp).
+    // Fetch records where mc_stoppage_time >= yesterday to cover the current
+    // and previous shift window. Filter date and shift client-side using WAT offset.
+    const yesterday = (function(){
+      const d = new Date(watNow()); d.setDate(d.getDate()-1);
+      return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    })();
+    const trackingQ = "&mc_stoppage_time=gte." + yesterday + "T00:00:00";
 
     const [trackingRows, treatedRes] = await Promise.all([
       fetchAllRows("tracking_table", trackingQ),
@@ -119,15 +125,15 @@ async function init(){
       TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
     }
 
-    // Count Technical Loss rows for the current shift
+    // Count Technical Loss rows for the current shift using WAT date from mc_stoppage_time
     const techLossCount = MON_ROWS.filter(r=>
+      watDateFromStoppage(r.mc_stoppage_time) === dateStr &&
       (r.job_code||"").trim().toLowerCase() === "technical loss" &&
       (r.shift||"").toLowerCase() === shift.toLowerCase()
     ).length;
 
-    const lagNote = effectiveDate !== dateStr ? " ⚠️ sync lag — showing " + effectiveDate : "";
-    status.style.color = effectiveDate !== dateStr ? "#ffd54f" : "#7fffb0";
-    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " rows for " + effectiveDate + lagNote + " | " + techLossCount + " Technical Loss (" + shift + ") | treated: " + TREATED_IDS.size + ".";
+    status.style.color = "#7fffb0";
+    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " recent rows | " + techLossCount + " Technical Loss (" + dateStr + " / " + shift + ") | treated: " + TREATED_IDS.size + ".";
     loadData();
   }catch(e){
     status.style.color = "#ff8a80";
@@ -140,14 +146,14 @@ function loadData(){
   const { shift, dateStr } = currentShiftAndDate();
   const now = new Date();
 
-  // Filter client-side: job_code case-insensitive, shed exact, exclude treated.
-  // If the effective date matches today, also filter by current shift.
-  // If there is a sync lag (older date), show all shifts so data is visible.
-  const effectiveDateInData = MON_ROWS.length ? (MON_ROWS[0].date_col||"").slice(0,10) : dateStr;
-  const shiftMatchesToday = effectiveDateInData === dateStr;
+  // Filter client-side:
+  // - WAT date derived from mc_stoppage_time (date_col is null/corrupt)
+  // - shift and job_code case-insensitive
+  // - exclude already-treated machines
   const rows = MON_ROWS.filter(r=>{
+    if(watDateFromStoppage(r.mc_stoppage_time) !== dateStr) return false;
     if((r.job_code||"").trim().toLowerCase() !== "technical loss") return false;
-    if(shiftMatchesToday && (r.shift||"").toLowerCase() !== shift.toLowerCase()) return false;
+    if((r.shift||"").toLowerCase() !== shift.toLowerCase()) return false;
     if(TREATED_IDS.has(String(r.asset_id))) return false;
     if(shed !== "All" && String(r.shed) !== shed) return false;
     return true;
@@ -161,9 +167,9 @@ function loadData(){
   }
 
   rows.forEach(r=>{
-    // mc_stoppage_time matches GAS MC_Stoppage_Time column
-    const stopRaw = (r.mc_stoppage_time||"").replace(/Z$|\+00:00$/, "");
-    const stop = stopRaw ? new Date(stopRaw) : null;
+    // Parse mc_stoppage_time: "2026-07-23 03:33:25.501 UTC" → UTC Date
+    const stopUtcStr = (r.mc_stoppage_time||"").replace(" UTC","Z").replace(" ","T");
+    const stop = stopUtcStr ? new Date(stopUtcStr) : null;
     const downtimeMin = stop && !isNaN(stop) ? (Math.round(((now - stop)/60000)*100)/100) : "";
     const tr = document.createElement("tr");
     // GAS uses t.ID as the join key — Supabase tracking_table column is 'id'

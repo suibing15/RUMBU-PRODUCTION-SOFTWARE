@@ -68,21 +68,45 @@ function currentShiftAndDate(){
 
 let MON_ROWS = [], TREATED_IDS = new Set();
 
+// Paginated fetch matching GAS tracking_table query
+async function fetchAllRows(table, query){
+  let all = [], offset = 0; const pageSize = 1000;
+  const q = query || "";
+  while(true){
+    const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset+"-"+(offset+pageSize-1) });
+    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=*" + q + "&order=id.asc", { headers });
+    if(!res.ok) throw new Error(table + ": HTTP " + res.status);
+    const batch = await res.json();
+    all = all.concat(batch);
+    if(batch.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
 async function init(){
   const status = document.getElementById("status");
   try{
-    const [monRes, treatedRes] = await Promise.all([
-      fetch(SUPABASE_URL + "/rest/v1/monitoring?select=*", { headers: authHeaders() }),
+    const { shift, dateStr } = currentShiftAndDate();
+
+    // Fetch tracking_table filtered by date + shift + job_code — matches GAS WHERE clause
+    const trackingQ = "&date_col=eq." + dateStr + "&shift=eq." + encodeURIComponent(shift) + "&job_code=eq.Technical%20Loss";
+
+    const [trackingRows, treatedRes] = await Promise.all([
+      fetchAllRows("tracking_table", trackingQ),
       fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number", { headers: authHeaders() })
     ]);
-    if(!monRes.ok) throw new Error("monitoring: HTTP " + monRes.status);
-    MON_ROWS = await monRes.json();
+
+    MON_ROWS = trackingRows;
+
     if(treatedRes.ok){
       const treatedRows = await treatedRes.json();
+      // GAS joins on t.ID = tr.ID — in Supabase: tracking_table.id → treated_table.id_number
       TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
     }
+
     status.style.color = "#7fffb0";
-    status.textContent = "Connected. monitoring: " + MON_ROWS.length + " rows, treated: " + TREATED_IDS.size + ".";
+    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " Technical Loss rows (" + dateStr + " / " + shift + "), treated: " + TREATED_IDS.size + ".";
     loadData();
   }catch(e){
     status.style.color = "#ff8a80";
@@ -95,11 +119,11 @@ function loadData(){
   const { shift, dateStr } = currentShiftAndDate();
   const now = new Date();
 
+  // Records already pre-filtered by date/shift/job_code in the Supabase fetch.
+  // Only apply shed filter and treated exclusion here.
+  // GAS joins on t.ID = tr.ID — Supabase tracking_table key is 'id'
   const rows = MON_ROWS.filter(r=>{
-    if(r.date_col !== dateStr) return false;
-    if(r.shift !== shift) return false;
-    if(r.job_code !== "Technical Loss") return false;
-    if(TREATED_IDS.has(String(r.asset_id))) return false;
+    if(TREATED_IDS.has(String(r.id))) return false;
     if(shed !== "All" && String(r.shed) !== shed) return false;
     return true;
   });
@@ -112,12 +136,15 @@ function loadData(){
   }
 
   rows.forEach(r=>{
-    const stop = new Date(r.m_c_stoppage_time);
-    const downtimeMin = isNaN(stop) ? "" : (Math.round(((now - stop)/60000)*100)/100);
+    // mc_stoppage_time matches GAS MC_Stoppage_Time column
+    const stopRaw = (r.mc_stoppage_time||"").replace(/Z$|\+00:00$/, "");
+    const stop = stopRaw ? new Date(stopRaw) : null;
+    const downtimeMin = stop && !isNaN(stop) ? (Math.round(((now - stop)/60000)*100)/100) : "";
     const tr = document.createElement("tr");
-    tr.id = "row-" + r.asset_id;
-    tr.innerHTML = `<td>${r.assets||""}</td><td>${downtimeMin}</td><td>${r.shed||""}</td><td>${r.descripttion||""}</td>` +
-      `<td><button onclick="confirmTreat('${r.asset_id}')">TREATED</button></td>`;
+    // GAS uses t.ID as the join key — Supabase tracking_table column is 'id'
+    tr.id = "row-" + r.id;
+    tr.innerHTML = `<td>${r.assets||""}</td><td>${downtimeMin}</td><td>${r.shed||""}</td><td>${r.description||""}</td>` +
+      `<td><button onclick="confirmTreat('${r.id}')">TREATED</button></td>`;
     body.appendChild(tr);
   });
 }
@@ -125,6 +152,8 @@ function loadData(){
 async function confirmTreat(id){
   if(!confirm("Mark as treated?")) return;
   try{
+    // GAS MERGE inserts (ID, treated_time) into treated_table
+    // Supabase treated_table column is 'id_number' (confirmed from codebase)
     const row = { id_number: id, treated_time: new Date().toISOString() };
     const res = await fetch(SUPABASE_URL + "/rest/v1/treated_table", {
       method: "post", headers: authHeaders(), body: JSON.stringify(row)

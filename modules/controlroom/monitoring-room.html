@@ -191,17 +191,35 @@ async function loadDashboard(){
     const controlDateClause = "&date=gte." + from + "&date=lte." + to;
     const trackingDateClause = "&date_col=gte." + from + "&date_col=lte." + to;
 
+    // Load today's rows
     CONTROL_ROWS = await fetchAllRows(CONTROL_TABLE, controlDateClause);
     TRACKING_ROWS = await fetchAllRows(TRACKING_TABLE, trackingDateClause);
 
-    // GAS joins tracking_table.ID → treated_table.ID.
-    // In Supabase the treated_table primary key is 'id_number' and tracking uses 'id'.
-    // Fetch treated_table scoped to today's date to avoid stale treated records
-    // from previous days inflating the "repaired" count.
-    const fromVal = document.getElementById("fromDate").value;
-    const toVal   = document.getElementById("toDate").value;
-    const treatedQ = "?select=id_number&date_col=gte." + fromVal + "&date_col=lte." + toVal;
-    const tres = await fetch(SUPABASE_URL + "/rest/v1/" + TREATED_TABLE + treatedQ, { headers: authHeaders() });
+    // Also load yesterday's control + tracking rows so that when Morning shift is
+    // selected the "Previous Shift Nurses" panel can show Night shift from yesterday.
+    // GAS handles this with a BigQuery WHERE clause that spans two dates;
+    // Vercel must pre-fetch both days client-side.
+    const yesterday = nigeriaYesterdayISO();
+    if(from === nigeriaDateISO()){
+      // Only auto-load yesterday when the date picker is set to today (default).
+      // Avoids double-loading when the user picks a historical range manually.
+      const yControlClause = "&date=gte." + yesterday + "&date=lte." + yesterday;
+      const yTrackingClause = "&date_col=gte." + yesterday + "&date_col=lte." + yesterday;
+      const [yCtrl, yTrack] = await Promise.all([
+        fetchAllRows(CONTROL_TABLE, yControlClause),
+        fetchAllRows(TRACKING_TABLE, yTrackingClause)
+      ]);
+      // Merge — de-duplicate on id so we never double-count if ranges overlap
+      const existingIds = new Set(CONTROL_ROWS.map(r => r.id));
+      yCtrl.forEach(r => { if(!existingIds.has(r.id)) CONTROL_ROWS.push(r); });
+      const existingTIds = new Set(TRACKING_ROWS.map(r => r.id));
+      yTrack.forEach(r => { if(!existingTIds.has(r.id)) TRACKING_ROWS.push(r); });
+    }
+
+    // GAS has no date filter on treated_table — it fetches ALL treated records
+    // and joins on tracking_table.ID = treated_table.ID.
+    // In Supabase: treated_table key = id_number, tracking_table key = asset_id.
+    const tres = await fetch(SUPABASE_URL + "/rest/v1/" + TREATED_TABLE + "?select=id_number", { headers: authHeaders() });
     if(tres.ok){
       const trows = await tres.json();
       TREATED_IDS = new Set(trows.map(r => String(r.id_number)));
@@ -209,7 +227,7 @@ async function loadDashboard(){
       TREATED_IDS = new Set();
     }
 
-    status.className=""; status.textContent = "Connected. control: " + CONTROL_ROWS.length + " | tracking_table: " + TRACKING_ROWS.length + " (for " + from + " to " + to + ")";
+    status.className=""; status.textContent = "Connected. control: " + CONTROL_ROWS.length + " rows | tracking: " + TRACKING_ROWS.length + " rows | treated: " + TREATED_IDS.size + " (from " + from + " to " + to + ")";
     render();
   }catch(e){
     status.className="bad"; status.textContent = "Could not read data: " + (e.message||e);
@@ -321,9 +339,8 @@ function render(){
   const statusRows = filteredTrackingRowsForShift(currentShift);
   let waiting = 0, repaired = 0;
   statusRows.forEach(r=>{
-    // GAS joins on tracking_table.ID = treated_table.ID.
-    // In Supabase: tracking_table primary key column is 'id'.
-    const key = String(r.id || "");
+    // tracking_table.asset_id → treated_table.id_number (confirmed from codebase)
+    const key = String(r.asset_id || "");
     if(TREATED_IDS.has(key)) repaired++; else waiting++;
   });
 

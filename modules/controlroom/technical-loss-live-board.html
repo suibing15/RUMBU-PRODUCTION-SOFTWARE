@@ -66,6 +66,19 @@ function currentShiftAndDate(){
   return { shift, dateStr: y+"-"+m+"-"+d };
 }
 
+// Extract WAT date string (YYYY-MM-DD) from a mc_stoppage_time UTC string
+function watDateFromStoppage(ts){
+  if(!ts) return "";
+  // mc_stoppage_time format: "2026-07-23 03:33:25.501 UTC"
+  // Replace space+UTC with Z so JS Date parses it as UTC
+  const utcStr = ts.replace(" UTC","Z").replace(" ","T");
+  const d = new Date(utcStr);
+  if(isNaN(d)) return "";
+  // Add WAT offset (+1h) to get local Nigeria date
+  const wat = new Date(d.getTime() + 3600000);
+  return wat.getFullYear()+"-"+String(wat.getMonth()+1).padStart(2,"0")+"-"+String(wat.getDate()).padStart(2,"0");
+}
+
 let MON_ROWS = [], TREATED_IDS = new Set();
 
 // Paginated fetch matching GAS tracking_table query
@@ -89,32 +102,32 @@ async function init(){
   try{
     const { shift, dateStr } = currentShiftAndDate();
 
-    // Fetch tracking_table filtered by date only server-side.
-    // Shift and job_code filtered client-side (case-insensitive) to avoid
-    // Supabase eq. case-sensitivity issues with stored values.
-    const trackingQ = "&date_col=eq." + dateStr;
-
+    // date_col is NULL/corrupt and mc_stoppage_time is TEXT (not TIMESTAMP),
+    // so server-side date filters are unreliable. Instead fetch the latest
+    // 1000 rows by id DESC — these are the most recently inserted records —
+    // and filter entirely client-side using watDateFromStoppage().
     const [trackingRows, treatedRes] = await Promise.all([
-      fetchAllRows("tracking_table", trackingQ),
-      fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number", { headers: authHeaders() })
+      fetch(SUPABASE_URL + "/rest/v1/tracking_table?select=*&order=id.desc&limit=1000",
+        { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number",
+        { headers: authHeaders() })
     ]);
 
-    MON_ROWS = trackingRows;
+    MON_ROWS = Array.isArray(trackingRows) ? trackingRows : [];
 
     if(treatedRes.ok){
       const treatedRows = await treatedRes.json();
-      // tracking_table.asset_id → treated_table.id_number
       TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
     }
 
-    // Count only the Technical Loss rows for display
     const techLossCount = MON_ROWS.filter(r=>
+      watDateFromStoppage(r.mc_stoppage_time) === dateStr &&
       (r.job_code||"").trim().toLowerCase() === "technical loss" &&
       (r.shift||"").toLowerCase() === shift.toLowerCase()
     ).length;
 
     status.style.color = "#7fffb0";
-    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " total rows, " + techLossCount + " Technical Loss (" + dateStr + " / " + shift + "), treated: " + TREATED_IDS.size + ".";
+    status.textContent = "Connected. tracking_table: " + MON_ROWS.length + " recent rows | " + techLossCount + " Technical Loss (" + dateStr + " / " + shift + ") | treated: " + TREATED_IDS.size + ".";
     loadData();
   }catch(e){
     status.style.color = "#ff8a80";
@@ -127,9 +140,12 @@ function loadData(){
   const { shift, dateStr } = currentShiftAndDate();
   const now = new Date();
 
-  // Filter client-side: shift and job_code case-insensitive, shed exact, exclude treated.
-  // asset_id is the tracking_table record key (matches tracking-table-viewer pattern).
+  // Filter client-side:
+  // - WAT date derived from mc_stoppage_time (date_col is null/corrupt)
+  // - shift and job_code case-insensitive
+  // - exclude already-treated machines
   const rows = MON_ROWS.filter(r=>{
+    if(watDateFromStoppage(r.mc_stoppage_time) !== dateStr) return false;
     if((r.job_code||"").trim().toLowerCase() !== "technical loss") return false;
     if((r.shift||"").toLowerCase() !== shift.toLowerCase()) return false;
     if(TREATED_IDS.has(String(r.asset_id))) return false;
@@ -145,9 +161,9 @@ function loadData(){
   }
 
   rows.forEach(r=>{
-    // mc_stoppage_time matches GAS MC_Stoppage_Time column
-    const stopRaw = (r.mc_stoppage_time||"").replace(/Z$|\+00:00$/, "");
-    const stop = stopRaw ? new Date(stopRaw) : null;
+    // Parse mc_stoppage_time: "2026-07-23 03:33:25.501 UTC" → UTC Date
+    const stopUtcStr = (r.mc_stoppage_time||"").replace(" UTC","Z").replace(" ","T");
+    const stop = stopUtcStr ? new Date(stopUtcStr) : null;
     const downtimeMin = stop && !isNaN(stop) ? (Math.round(((now - stop)/60000)*100)/100) : "";
     const tr = document.createElement("tr");
     // GAS uses t.ID as the join key — Supabase tracking_table column is 'id'

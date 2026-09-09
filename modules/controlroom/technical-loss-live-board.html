@@ -89,9 +89,22 @@ async function init(){
   try{
     const { shift, dateStr } = currentShiftAndDate();
 
-    // Fetch tracking_table filtered by date only server-side.
-    // Shift and job_code filtered client-side (case-insensitive) to avoid
-    // Supabase eq. case-sensitivity issues with stored values.
+    // DEBUG: fetch first 5 rows with NO filter to check table exists + column names.
+    // Then fetch properly filtered rows.
+    const debugRes = await fetch(SUPABASE_URL + "/rest/v1/tracking_table?select=*&limit=5", { headers: authHeaders() });
+    const debugRows = debugRes.ok ? await debugRes.json() : [];
+    if(debugRows.length){
+      console.log("tracking_table sample row:", JSON.stringify(debugRows[0]));
+      // Show column names and sample date value in status temporarily
+      const sampleCols = Object.keys(debugRows[0]).join(", ");
+      const sampleDate = debugRows[0].date_col || debugRows[0].date || debugRows[0].Date || "(no date col found)";
+      document.getElementById("status").textContent = "DEBUG — columns: " + sampleCols + " | sample date: " + sampleDate;
+      await new Promise(r => setTimeout(r, 5000)); // show for 5 seconds
+    } else {
+      document.getElementById("status").textContent = "DEBUG — tracking_table returned 0 rows even with no filter. Table may be empty or inaccessible.";
+      await new Promise(r => setTimeout(r, 5000));
+    }
+
     const trackingQ = "&date_col=eq." + dateStr;
 
     const [trackingRows, treatedRes] = await Promise.all([

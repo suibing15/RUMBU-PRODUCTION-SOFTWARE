@@ -243,7 +243,7 @@ async function uploadIfPresent(fileInputId, existingUrl, folder){
   if(!file) return { url: existingUrl || null, warning: null };
   try{
     const path = folder + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
-    const { error } = await sb.storage.from("logistics-attachments").upload(path, file, { upsert:true });
+    const { error } = await sb.storage.from("logistics-attachments").upload(path, file);
     if(error) throw error;
     const { data } = sb.storage.from("logistics-attachments").getPublicUrl(path);
     return { url: data.publicUrl, warning: null };

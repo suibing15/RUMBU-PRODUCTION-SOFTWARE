@@ -27,6 +27,17 @@
   table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px;background:var(--card);}
   th,td{border:1px solid #333;padding:5px;text-align:center;}
   th{background:var(--navy);color:#fff;}
+  /* ── Job Code autocomplete ── */
+  .jc-wrap{position:relative;margin-top:5px;}
+  .jc-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#888;font-size:16px;line-height:1;padding:0;width:auto;display:none;}
+  .jc-clear:hover{color:#e53935;}
+  .jc-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--line);border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:999;display:none;box-shadow:0 4px 8px rgba(0,0,0,.15);}
+  .jc-option{padding:7px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line);}
+  .jc-option:last-child{border-bottom:none;}
+  .jc-option:hover,.jc-option.active{background:var(--accent);color:#fff;}
+  .jc-match{font-weight:700;}
+  .jc-empty{padding:10px;text-align:center;color:#888;font-size:13px;}
+  .jc-badge{display:inline-block;background:rgba(46,117,182,.15);color:var(--heading);border:1px solid var(--accent);border-radius:4px;padding:1px 7px;font-size:12px;font-weight:700;margin-left:6px;vertical-align:middle;}
   @media print{ .no-print{display:none !important;} }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -54,6 +65,13 @@
     <label>End Date</label><input type="date" id="endDate">
   </div>
   <label>Department</label><select id="department"></select>
+  <label>Job Code <span id="jcBadge" class="jc-badge" style="display:none;"></span></label>
+  <div class="jc-wrap">
+    <input type="text" id="jobCodeInput" placeholder="Type to search… (blank = All)" autocomplete="off" style="padding-right:28px;">
+    <button class="jc-clear" id="jcClear" type="button" title="Clear">✕</button>
+    <div class="jc-dropdown" id="jcDropdown"></div>
+  </div>
+  <input type="hidden" id="jobCode" value="All">
   <label>Shift</label><select id="shift"><option>All</option><option>Morning</option><option>Night</option></select>
   <label>Section</label><select id="section"><option>All</option></select>
   <button onclick="generate()">Generate Report</button>
@@ -70,7 +88,7 @@ function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "
 function parseDT(v){ const d=new Date(v); return isNaN(d)?null:d; }
 function minutesBetween(a,b){ return (!a||!b)?0:Math.trunc((b-a)/60000); }
 function extractNumber(v){ if(v==null) return 0; const m=String(v).match(/\d+(\.\d+)?/); return m?Number(m[0]):0; }
-function fmtDate(d){ return d.toISOString().slice(0,10); }
+function fmtDate(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 
 // ---- Exact department -> job-code map from the original script. ----
 // NOTE: this report filters by Job_Code membership in this map, NOT by a
@@ -135,6 +153,15 @@ const DEPARTMENTS = {
   ]
 };
 
+// ── Job Code autocomplete state ──
+let jobCodePool = [];
+function naturalSort(a,b){ return a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}); }
+function rebuildJobCodeList(){
+  const dept = document.getElementById("department").value;
+  const codes = getJobCodesByDepartment(dept);
+  jobCodePool = [...new Set(codes)].sort(naturalSort);
+}
+
 function getJobCodesByDepartment(department){
   if(department === "All") return Object.values(DEPARTMENTS).flat();
   return DEPARTMENTS[department] || [];
@@ -163,7 +190,7 @@ async function fetchAllRows(table, select, query){
   let all = [], offset = 0; const pageSize = 1000; const q = query||"";
   for(let guard=0; guard<500; guard++){
     const headers = Object.assign({}, authHeaders(), { "Range-Unit":"items", "Range": offset + "-" + (offset+pageSize-1) });
-    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q, { headers });
+    const res = await fetch(SUPABASE_URL + "/rest/v1/" + table + "?select=" + (select||"*") + q + "&order=id.asc", { headers });
     if(!res.ok) throw new Error(table + ": HTTP " + res.status);
     const batch = await res.json();
     all = all.concat(batch);
@@ -196,6 +223,8 @@ async function init(){
   const deptSel = document.getElementById("department");
   const allOpt = document.createElement("option"); allOpt.value="All"; allOpt.textContent="All"; deptSel.appendChild(allOpt);
   Object.keys(DEPARTMENTS).forEach(name=>{ const o=document.createElement("option"); o.value=name; o.textContent=name; deptSel.appendChild(o); });
+    deptSel.addEventListener("change", ()=>{ resetJobCode(); rebuildJobCodeList(); });
+    rebuildJobCodeList();
 
   const today = new Date();
   const onejan = new Date(today.getFullYear(),0,1);
@@ -220,18 +249,20 @@ function togglePeriod(){
 
 function normalizeCode(c){ return String(c||"").trim().toUpperCase().replace(/\.0+$/,""); }
 
-function filterRows(range, department, shift, section){
-  const jobCodes = getJobCodesByDepartment(department);
-  // Normalize both sides: strips .0/.00 float artifacts, uppercases, trims whitespace.
-  // Matches old AppScript's UPPER(TRIM(REGEXP_REPLACE(CAST(Job_Code AS STRING), r'\.0+$', '')))
-  const jobSet = department === "All" ? null : new Set(jobCodes.map(normalizeCode));
+function filterRows(range, department, shift, section, jobCode){
+  // If a specific job code is selected, filter to ONLY that code.
+  // Otherwise use the full department allow-list (excludes unlisted codes like OPR01, BR01, etc.)
+  const jobCodes = (jobCode && jobCode !== "All")
+    ? [jobCode]
+    : getJobCodesByDepartment(department);
+  const jobSet = new Set(jobCodes.map(normalizeCode));
   return CTRL_ROWS.filter(r=>{
-    if(!r.stop_time || !r.finish_time) return false;
+    if(!r.stop_time || !r.starting_time || !r.finish_time) return false; // matches GAS WHERE ... IS NOT NULL
     // Use the date from mc_stoppage_time (matches old script's DATE(MC_Stoppage_Time) BETWEEN)
     const stopDate = r.stop_time ? r.stop_time.slice(0,10) : r.date_col;
     if(stopDate < range.startDate || stopDate > range.endDate) return false;
     // Job code: normalize both sides
-    if(jobSet && !jobSet.has(normalizeCode(r.job_code))) return false;
+    if(!jobSet.has(normalizeCode(r.job_code))) return false; // exclude codes not in any known department
     // Shift: case-insensitive
     if(shift !== "All" && (r.shift||"").trim().toUpperCase() !== shift.toUpperCase()) return false;
     // Section: match old AppScript's LIKE logic exactly
@@ -247,8 +278,8 @@ function filterRows(range, department, shift, section){
   });
 }
 
-function summariseRange(range, department, shift, section){
-  const rows = filterRows(range, department, shift, section);
+function summariseRange(range, department, shift, section, jobCode){
+  const rows = filterRows(range, department, shift, section, jobCode);
   let downtime=0, repair=0, waiting=0;
   rows.forEach(r=>{
     const stop=parseDT(r.stop_time), start=parseDT(r.starting_time), finish=parseDT(r.finish_time);
@@ -260,14 +291,14 @@ function summariseRange(range, department, shift, section){
     efficiency: repair>0 ? (repair/(repair+waiting))*100 : 0 };
 }
 
-function get5PeriodSummary(periodType, year, week, month, startDate, endDate, department, shift, section){
+function get5PeriodSummary(periodType, year, week, month, startDate, endDate, department, shift, section, jobCode){
   const summary = [];
   if(periodType === "Monthly"){
     for(let i=4;i>=0;i--){
       let m = Number(month)-i, y = Number(year);
       while(m<=0){ m+=12; y-=1; }
       const range = getMonthDateRange(y,m);
-      const s = summariseRange(range, department, shift, section);
+      const s = summariseRange(range, department, shift, section, jobCode);
       summary.push({ label: y+"-"+String(m).padStart(2,"0"), ...s });
     }
   } else if(periodType === "Custom"){
@@ -277,7 +308,7 @@ function get5PeriodSummary(periodType, year, week, month, startDate, endDate, de
       const rangeEnd = new Date(end); rangeEnd.setDate(end.getDate()-(intervalDays*i));
       const rangeStart = new Date(rangeEnd); rangeStart.setDate(rangeEnd.getDate()-intervalDays+1);
       const range = { startDate: fmtDate(rangeStart), endDate: fmtDate(rangeEnd) };
-      const s = summariseRange(range, department, shift, section);
+      const s = summariseRange(range, department, shift, section, jobCode);
       summary.push({ label: range.startDate+" &rarr; "+range.endDate, ...s });
     }
   } else {
@@ -285,12 +316,86 @@ function get5PeriodSummary(periodType, year, week, month, startDate, endDate, de
       const w = Number(week)-i;
       if(w<=0) continue;
       const range = getWeekDateRange(year, w);
-      const s = summariseRange(range, department, shift, section);
+      const s = summariseRange(range, department, shift, section, jobCode);
       summary.push({ label: "Week "+w, ...s });
     }
   }
   return summary;
 }
+
+// ─────────────────────────────────────────
+// Job Code Autocomplete Widget
+// ─────────────────────────────────────────
+(function initJC(){
+  const jcInput    = document.getElementById("jobCodeInput");
+  const jcDropdown = document.getElementById("jcDropdown");
+  const jcHidden   = document.getElementById("jobCode");
+  const jcClear    = document.getElementById("jcClear");
+  const jcBadge    = document.getElementById("jcBadge");
+  let activeIdx = -1;
+
+  function escHtml(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function renderDropdown(q){
+    activeIdx = -1;
+    jcDropdown.innerHTML = "";
+    const matches = q
+      ? jobCodePool.filter(j=>j.toUpperCase().includes(q))
+      : jobCodePool.slice(0,80);
+    if(!matches.length){
+      jcDropdown.innerHTML = "<div class=\"jc-empty\">No matching job codes</div>";
+      jcDropdown.style.display = "block"; return;
+    }
+    matches.forEach(code=>{
+      const div = document.createElement("div");
+      div.className = "jc-option"; div.dataset.value = code;
+      if(q){
+        const idx = code.toUpperCase().indexOf(q);
+        div.innerHTML = escHtml(code.slice(0,idx))+"<span class=\"jc-match\">"+escHtml(code.slice(idx,idx+q.length))+"</span>"+escHtml(code.slice(idx+q.length));
+      } else { div.textContent = code; }
+      div.addEventListener("mousedown", e=>{ e.preventDefault(); selectJobCode(code); });
+      jcDropdown.appendChild(div);
+    });
+    jcDropdown.style.display = "block";
+  }
+
+  function highlightItem(items){
+    items.forEach((el,i)=>{ el.classList.toggle("active", i===activeIdx); if(i===activeIdx) el.scrollIntoView({block:"nearest"}); });
+  }
+
+  function selectJobCode(code){
+    jcHidden.value = code; jcInput.value = code;
+    jcBadge.textContent = code; jcBadge.style.display = "inline-block";
+    jcClear.style.display = "block"; closeDropdown();
+  }
+
+  function resetJobCode(){
+    jcHidden.value = "All"; jcInput.value = "";
+    jcBadge.style.display = "none"; jcClear.style.display = "none"; closeDropdown();
+  }
+
+  function closeDropdown(){ jcDropdown.style.display = "none"; activeIdx = -1; }
+
+  jcInput.addEventListener("input", function(){
+    const q = this.value.trim().toUpperCase();
+    jcHidden.value = "All"; jcBadge.style.display = "none";
+    jcClear.style.display = this.value ? "block" : "none";
+    renderDropdown(q);
+  });
+  jcInput.addEventListener("focus", function(){ if(this.value.trim()) renderDropdown(this.value.trim().toUpperCase()); });
+  jcInput.addEventListener("keydown", function(e){
+    const items = jcDropdown.querySelectorAll(".jc-option");
+    if(e.key==="ArrowDown"){ e.preventDefault(); activeIdx=Math.min(activeIdx+1,items.length-1); highlightItem(items); }
+    else if(e.key==="ArrowUp"){ e.preventDefault(); activeIdx=Math.max(activeIdx-1,0); highlightItem(items); }
+    else if(e.key==="Enter"){ e.preventDefault(); if(activeIdx>=0&&items[activeIdx]) selectJobCode(items[activeIdx].dataset.value); }
+    else if(e.key==="Escape") closeDropdown();
+  });
+  jcClear.addEventListener("click", resetJobCode);
+  document.addEventListener("click", e=>{ if(!e.target.closest(".jc-wrap")) closeDropdown(); });
+
+  // expose resetJobCode globally so dept change listener can call it
+  window.resetJobCode = resetJobCode;
+})();
 
 async function generate(){
   const year = Number(document.getElementById("year").value);
@@ -302,6 +407,7 @@ async function generate(){
   const department = document.getElementById("department").value;
   const shift = document.getElementById("shift").value;
   const section = document.getElementById("section").value;
+  const jobCode = document.getElementById("jobCode").value; // "All" or specific code
 
   let range;
   if(periodType === "Monthly") range = getMonthDateRange(year, month);
@@ -326,8 +432,8 @@ async function generate(){
   }
   status.textContent = "";
 
-  const summary5 = get5PeriodSummary(periodType, year, week, month, startDateI, endDateI, department, shift, section);
-  const rows = filterRows(range, department, shift, section);
+  const summary5 = get5PeriodSummary(periodType, year, week, month, startDateI, endDateI, department, shift, section, jobCode);
+  const rows = filterRows(range, department, shift, section, jobCode);
 
   if(!rows.length){
     document.getElementById("reportArea").innerHTML = "<p>⚠️ No data found for the selected filters.</p>";
@@ -344,7 +450,7 @@ async function generate(){
     byJob[j].downtime += minutesBetween(stop, finish);
     byJob[j].repair += minutesBetween(start, finish);
     byJob[j].waiting += minutesBetween(stop, start);
-    byJob[j].est += extractNumber(r.extimated_time);
+    byJob[j].est += Math.ceil(extractNumber(r.extimated_time)); // ceil per-row to match GAS
   });
   const jobData = Object.values(byJob).map(r=>({ ...r, eff: r.repair>0 ? (r.est/r.repair)*100 : 0 }))
     .sort((a,b)=>b.count-a.count);
@@ -352,9 +458,11 @@ async function generate(){
 
   let reportTitle = periodType==="Monthly" ? "Monthly Downtime Report" : periodType==="Custom" ? "Custom Downtime Report" : "Weekly Downtime Report";
   let periodLabel = periodType==="Monthly" ? "Month: "+month : periodType==="Custom" ? "Custom Report" : "Week: "+week;
+  const isSpecificCode = jobCode && jobCode !== "All";
+  const jobCodeLabel = isSpecificCode ? "Job Code: "+jobCode : "Department: "+department;
 
   let html = `<h2 style="text-align:center;">${reportTitle}</h2>
-    <p style="text-align:center;">Year: ${year} | ${periodType} ${periodLabel} | Department: ${department} (${range.startDate} &rarr; ${range.endDate})</p>
+    <p style="text-align:center;">Year: ${year} | ${periodType} ${periodLabel} | ${jobCodeLabel} (${range.startDate} &rarr; ${range.endDate})</p>
     <table><tr><th>Job</th><th>Count</th><th>Downtime</th><th>Repair</th><th>Waiting</th><th>Est</th><th>%</th></tr>`;
 
   let tC=0,tD=0,tR=0,tW=0,tE=0;
@@ -385,7 +493,7 @@ async function generate(){
   });
 
   html += `<br><h3 style="text-align:center;">Asset Breakdown (Job Code Structure)</h3>
-    <p style="text-align:center;">Department: ${department} | Shift: ${shift} | Section: ${section}</p>
+    <p style="text-align:center;">${jobCodeLabel} | Shift: ${shift} | Section: ${section}</p>
     <table><tr><th>Asset</th><th>Work Order</th><th>Nurse</th><th>Date</th><th>D</th><th>R</th><th>W</th><th>E</th></tr>`;
 
   let currentJob="", currentShed="", currentAsset="";
@@ -422,12 +530,13 @@ async function generate(){
     const down = minutesBetween(stop, finish), rep = minutesBetween(start, finish), wait = minutesBetween(stop, start);
     const est = extractNumber(r.extimated_time);
 
-    countWO++; sumDown+=down; sumRep+=rep; sumWait+=wait; sumEst+=est;
-    gd+=down; gr+=rep; gw+=wait; ge+=est;
+    const estC = Math.ceil(est); // ceil per-row to match GAS
+    countWO++; sumDown+=down; sumRep+=rep; sumWait+=wait; sumEst+=estC;
+    gd+=down; gr+=rep; gw+=wait; ge+=estC;
 
     const label = [asset, r.discription, r.part_needed].filter(Boolean).join(" / ") + (job ? " / "+job : "");
     html += `<tr><td>${label}</td><td>${r.work_order||""}</td><td>${r.names||""}</td><td>${r.date_col||""}</td>` +
-      `<td>${down}</td><td>${rep}</td><td>${wait}</td><td>${est}</td></tr>`;
+      `<td>${down}</td><td>${rep}</td><td>${wait}</td><td>${Math.ceil(est)}</td></tr>`;
   });
   if(currentAsset !== "") html += subtotalRow();
 

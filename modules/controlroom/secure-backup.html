@@ -24,7 +24,7 @@ button:hover { background:var(--primary-2); }
 <body>
 
 <div class="box">
-  <h2>Secure Backup</h2>
+  <h2>Backup</h2>
   <div id="status">Connecting to Supabase...</div>
 
   <input type="date" id="date">
@@ -35,7 +35,6 @@ button:hover { background:var(--primary-2); }
     <option value="control">Maintenance_Log</option>
   </select>
 
-  <input type="password" id="passcode" placeholder="Enter passcode">
 
   <button onclick="download()">Download CSV</button>
 </div>
@@ -43,7 +42,6 @@ button:hover { background:var(--primary-2); }
 <script>
 const SUPABASE_URL = "https://betfhunzmhtdzgvufmfk.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_AfDp1FlHghu9TOfqEUj20Q_Pke7GlTp";
-const PASSCODE = "backup2026";
 function authHeaders(){ return { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }; }
 
 let MW_ROWS = [], CTRL_ROWS = [];
@@ -96,10 +94,8 @@ function toCSV(rows){
 function download(){
   const date = document.getElementById("date").value;
   const table = document.getElementById("table").value;
-  const passcode = document.getElementById("passcode").value;
 
-  if(!date || !table || !passcode){ alert("Fill all fields"); return; }
-  if(passcode !== PASSCODE){ alert("❌ Invalid passcode"); return; }
+  if(!date || !table){ alert("Please select a date and table."); return; }
 
   const sourceRows = table === "matweaving" ? MW_ROWS : CTRL_ROWS;
   if(!sourceRows.length){ alert("Table not loaded yet — please wait for the connection status above."); return; }

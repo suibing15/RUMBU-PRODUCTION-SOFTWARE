@@ -161,6 +161,18 @@ function nigeriaDateISO(){
   const wat = new Date(utcMs + 1*3600000);
   return wat.getFullYear()+"-"+String(wat.getMonth()+1).padStart(2,"0")+"-"+String(wat.getDate()).padStart(2,"0");
 }
+function nigeriaYesterdayISO(){
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset()*60000;
+  const wat = new Date(utcMs + 1*3600000 - 86400000);
+  return wat.getFullYear()+"-"+String(wat.getMonth()+1).padStart(2,"0")+"-"+String(wat.getDate()).padStart(2,"0");
+}
+function nigeriaNowHour(){
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset()*60000;
+  const wat = new Date(utcMs + 1*3600000);
+  return wat.getHours();
+}
 
 async function loadDashboard(){
   const status = document.getElementById("status");
@@ -179,9 +191,34 @@ async function loadDashboard(){
     const controlDateClause = "&date=gte." + from + "&date=lte." + to;
     const trackingDateClause = "&date_col=gte." + from + "&date_col=lte." + to;
 
+    // Load today's rows
     CONTROL_ROWS = await fetchAllRows(CONTROL_TABLE, controlDateClause);
     TRACKING_ROWS = await fetchAllRows(TRACKING_TABLE, trackingDateClause);
 
+    // Also load yesterday's control + tracking rows so that when Morning shift is
+    // selected the "Previous Shift Nurses" panel can show Night shift from yesterday.
+    // GAS handles this with a BigQuery WHERE clause that spans two dates;
+    // Vercel must pre-fetch both days client-side.
+    const yesterday = nigeriaYesterdayISO();
+    if(from === nigeriaDateISO()){
+      // Only auto-load yesterday when the date picker is set to today (default).
+      // Avoids double-loading when the user picks a historical range manually.
+      const yControlClause = "&date=gte." + yesterday + "&date=lte." + yesterday;
+      const yTrackingClause = "&date_col=gte." + yesterday + "&date_col=lte." + yesterday;
+      const [yCtrl, yTrack] = await Promise.all([
+        fetchAllRows(CONTROL_TABLE, yControlClause),
+        fetchAllRows(TRACKING_TABLE, yTrackingClause)
+      ]);
+      // Merge — de-duplicate on id so we never double-count if ranges overlap
+      const existingIds = new Set(CONTROL_ROWS.map(r => r.id));
+      yCtrl.forEach(r => { if(!existingIds.has(r.id)) CONTROL_ROWS.push(r); });
+      const existingTIds = new Set(TRACKING_ROWS.map(r => r.id));
+      yTrack.forEach(r => { if(!existingTIds.has(r.id)) TRACKING_ROWS.push(r); });
+    }
+
+    // GAS has no date filter on treated_table — it fetches ALL treated records
+    // and joins on tracking_table.ID = treated_table.ID.
+    // In Supabase: treated_table key = id_number, tracking_table key = asset_id.
     const tres = await fetch(SUPABASE_URL + "/rest/v1/" + TREATED_TABLE + "?select=id_number", { headers: authHeaders() });
     if(tres.ok){
       const trows = await tres.json();
@@ -190,7 +227,7 @@ async function loadDashboard(){
       TREATED_IDS = new Set();
     }
 
-    status.className=""; status.textContent = "Connected. control: " + CONTROL_ROWS.length + " | tracking_table: " + TRACKING_ROWS.length + " (for " + from + " to " + to + ")";
+    status.className=""; status.textContent = "Connected. control: " + CONTROL_ROWS.length + " rows | tracking: " + TRACKING_ROWS.length + " rows | treated: " + TREATED_IDS.size + " (from " + from + " to " + to + ")";
     render();
   }catch(e){
     status.className="bad"; status.textContent = "Could not read data: " + (e.message||e);
@@ -221,7 +258,50 @@ function inDateRange(row){
   if(to && d > to) return false;
   return true;
 }
-function oppositeShift(shift){ return shift === "Morning" ? "Night" : "Morning"; }
+// Filters rows for the "previous shift" — mirrors GAS getOppositeShiftFilterSQL exactly.
+// Morning current → look at Night from yesterday (or night today if still before 07:00 WAT)
+// Night current   → look at Morning from today
+function filteredControlRowsForPrevShift(currentShift){
+  const todayISO = nigeriaDateISO();
+  const yesterdayISO = nigeriaYesterdayISO();
+  const hour = nigeriaNowHour();
+  if(currentShift === "Morning"){
+    // Previous = Night shift: yesterday, OR today before 07:00
+    return CONTROL_ROWS.filter(r=>{
+      if(r.shift !== "Night") return false;
+      const d = r.date || r.date_col || "";
+      return d === yesterdayISO || (d === todayISO && hour < 7);
+    });
+  } else {
+    // Previous = Morning shift: today
+    return CONTROL_ROWS.filter(r=>{
+      if(r.shift !== "Morning") return false;
+      const d = r.date || r.date_col || "";
+      return d === todayISO;
+    });
+  }
+}
+
+// For No-Repair Yesterday — mirrors GAS getOppositeShiftFilterForNoRepair exactly.
+// Morning current → Night yesterday (strict — no "before 07:00 today" clause)
+// Night current   → Morning today
+function filteredTrackingRowsForPrevShift(currentShift){
+  const todayISO = nigeriaDateISO();
+  const yesterdayISO = nigeriaYesterdayISO();
+  if(currentShift === "Morning"){
+    return TRACKING_ROWS.filter(r=>{
+      if(r.shift !== "Night") return false;
+      const d = r.date_col || "";
+      return d === yesterdayISO;
+    });
+  } else {
+    return TRACKING_ROWS.filter(r=>{
+      if(r.shift !== "Morning") return false;
+      const d = r.date_col || "";
+      return d === todayISO;
+    });
+  }
+}
 
 function filteredControlRowsForShift(shiftValue){
   return CONTROL_ROWS.filter(r=>{
@@ -259,6 +339,7 @@ function render(){
   const statusRows = filteredTrackingRowsForShift(currentShift);
   let waiting = 0, repaired = 0;
   statusRows.forEach(r=>{
+    // tracking_table.asset_id → treated_table.id_number (confirmed from codebase)
     const key = String(r.asset_id || "");
     if(TREATED_IDS.has(key)) repaired++; else waiting++;
   });
@@ -324,8 +405,8 @@ function render(){
   // Nurse Ranking — from control, Department = Technical,
   // matching getNurseRanking() / getNurseRankingByShift()
   // =========================================================
-  function buildNurseRanking(shiftValue){
-    const nrows = filteredControlRowsForShift(shiftValue).filter(r=>
+  function buildNurseRanking(rows){
+    const nrows = rows.filter(r=>
       r.finish_time && String(r.department).toLowerCase() === "technical"
     );
     // "persisting" = repeat visit to the same Date+Shift+Assets+Job_Code, ordered by starting_time
@@ -362,19 +443,19 @@ function render(){
     document.getElementById(elId).innerHTML = html;
   }
 
-  renderNurseTable("nurse_table", buildNurseRanking(currentShift));
+  renderNurseTable("nurse_table", buildNurseRanking(filteredControlRowsForShift(currentShift)));
   if(currentShift === "All"){
     document.getElementById("prev_nurse_table").innerHTML = "<tr><th colspan='7'>Select Morning or Night to see the opposite shift's nurses</th></tr>";
   } else {
-    renderNurseTable("prev_nurse_table", buildNurseRanking(oppositeShift(currentShift)));
+    renderNurseTable("prev_nurse_table", buildNurseRanking(filteredControlRowsForPrevShift(currentShift)));
   }
 
   // =========================================================
   // No Repair — Today / Yesterday, from tracking_table,
   // matching getNoRepairToday() / getNoRepairYesterday()
   // =========================================================
-  function buildNoRepair(shiftValue){
-    const rows = filteredTrackingRowsForShift(shiftValue).filter(r=>
+  function buildNoRepair(rows){
+    rows = rows.filter(r=>
       r.job_code && r.job_code.trim().toLowerCase() === "no repair"
     );
     const byOperator = {};
@@ -395,17 +476,19 @@ function render(){
     document.getElementById(elId).innerHTML = html;
   }
 
-  renderNoRepairTable("norepair_today", buildNoRepair(currentShift));
+  renderNoRepairTable("norepair_today", buildNoRepair(filteredTrackingRowsForShift(currentShift)));
   if(currentShift === "All"){
     document.getElementById("norepair_yesterday").innerHTML = "<tr><th colspan='3'>Select Morning or Night to see the opposite shift's No-Repair jobs</th></tr>";
   } else {
-    renderNoRepairTable("norepair_yesterday", buildNoRepair(oppositeShift(currentShift)));
+    renderNoRepairTable("norepair_yesterday", buildNoRepair(filteredTrackingRowsForPrevShift(currentShift)));
   }
 }
 
 document.getElementById("fromDate").value = nigeriaDateISO();
 document.getElementById("toDate").value = nigeriaDateISO();
-setShift("All");
+// Auto-detect shift on load — matches GAS getCurrentShift() behaviour
+const autoShift = (nigeriaNowHour() >= 7 && nigeriaNowHour() < 19) ? "Morning" : "Night";
+setShift(autoShift);
 loadDashboard();
 </script>
 </body>

@@ -257,10 +257,20 @@ async function saveDriver(){
     if(id){
       const { error } = await sb.from("logistics_drivers").update(payload).eq("id", id);
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"driver", entity_id:id, action:"updated",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " updated driver profile for " + (PICKED_EMPLOYEE?PICKED_EMPLOYEE.full_name:("employee #"+employeeId))
+      });
     } else {
       payload.created_by = ME.id;
-      const { error } = await sb.from("logistics_drivers").insert(payload);
+      const { data: inserted, error } = await sb.from("logistics_drivers").insert(payload).select("id").single();
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"driver", entity_id:inserted.id, action:"created",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " added driver profile for " + (PICKED_EMPLOYEE?PICKED_EMPLOYEE.full_name:("employee #"+employeeId))
+      });
     }
 
     status.className="status ok"; status.textContent="✅ Driver saved.";

@@ -258,11 +258,21 @@ async function proceedWithTripSubmit(){
       payload.cycle = (CURRENT_TRIP.cycle||1) + 1;
       const { error } = await sb.from("logistics_trips").update(payload).eq("id", CURRENT_TRIP.id);
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"trip", entity_id:CURRENT_TRIP.id, action:"resubmitted",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " resubmitted trip request to " + payload.destination
+      });
     } else {
       payload.cycle = 1;
       payload.requested_by = ME.id;
-      const { error } = await sb.from("logistics_trips").insert(payload);
+      const { data: inserted, error } = await sb.from("logistics_trips").insert(payload).select("id").single();
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"trip", entity_id:inserted.id, action:"submitted",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " submitted a trip request to " + payload.destination
+      });
     }
 
     if(status.className !== "status warn") status.className="status ok";

@@ -146,6 +146,27 @@ async function submitDispatch(){
   if(startMileage===""){ status.className="status err"; status.textContent="Starting Mileage is required."; return; }
   if(fuel===""){ status.className="status err"; status.textContent="Fuel Issued is required."; return; }
 
+  const t = DISPATCH_DATA.find(x=>x.id===Number(tripId));
+  status.textContent = "";
+  showReviewModal({
+    title: "Review Before Dispatching",
+    subtitle: (t ? t.destination + " — " + t.requesting_department : ""),
+    mode: "submit",
+    sections: [{ rows: [
+      ["Starting Mileage (km)", startMileage],
+      ["Fuel Issued (litres)", fuel],
+    ]}],
+    onConfirm: proceedWithDispatch
+  });
+}
+
+async function proceedWithDispatch(){
+  const status = document.getElementById("dispatchFormStatus");
+  const tripId = document.getElementById("disp_trip_id").value;
+  const startMileage = document.getElementById("disp_start_mileage").value;
+  const fuel = document.getElementById("disp_fuel").value;
+  const t = DISPATCH_DATA.find(x=>x.id===Number(tripId));
+
   status.className="status"; status.textContent="Saving...";
   try{
     const { error } = await sb.from("logistics_trips").update({
@@ -156,6 +177,11 @@ async function submitDispatch(){
       dispatched_by: ME.id
     }).eq("id", tripId);
     if(error) throw error;
+    await sb.from("logistics_activity_log").insert({
+      entity_type:"trip", entity_id:tripId, action:"dispatched",
+      actor_profile_id: ME.id, actor_username: ME.username,
+      description: ME.username + " dispatched trip to " + (t?t.destination:"")
+    });
     status.className="status ok"; status.textContent="✅ Trip dispatched.";
     await Promise.all([loadDispatchQueue(), loadClosureQueue()]);
     setTimeout(()=>{ document.getElementById("dispatchFormPanel").classList.add("hidden"); }, 700);
@@ -195,6 +221,29 @@ async function submitClosure(){
   if(Number(endMileage) < Number(t?.starting_mileage||0)){ status.className="status err"; status.textContent="Ending Mileage cannot be less than Starting Mileage ("+t.starting_mileage+")."; return; }
   if(expenses===""){ status.className="status err"; status.textContent="Trip Expenses is required (enter 0 if none)."; return; }
 
+  status.textContent = "";
+  showReviewModal({
+    title: "Review Before Closing Out",
+    subtitle: (t ? t.destination + " — " + t.requesting_department : ""),
+    mode: "submit",
+    sections: [{ rows: [
+      ["Starting Mileage (km)", t.starting_mileage],
+      ["Ending Mileage (km)", endMileage],
+      ["Distance Travelled (km)", document.getElementById("clos_distance").value],
+      ["Trip Expenses (NGN)", expenses],
+      ["Closure Remarks", document.getElementById("clos_remarks").value],
+    ]}],
+    onConfirm: proceedWithClosure
+  });
+}
+
+async function proceedWithClosure(){
+  const status = document.getElementById("closureFormStatus");
+  const tripId = document.getElementById("clos_trip_id").value;
+  const t = CLOSURE_DATA.find(x=>x.id===Number(tripId));
+  const endMileage = document.getElementById("clos_end_mileage").value;
+  const expenses = document.getElementById("clos_expenses").value;
+
   status.className="status"; status.textContent="Saving...";
   try{
     const { error } = await sb.from("logistics_trips").update({
@@ -207,6 +256,11 @@ async function submitClosure(){
       closed_by: ME.id
     }).eq("id", tripId);
     if(error) throw error;
+    await sb.from("logistics_activity_log").insert({
+      entity_type:"trip", entity_id:tripId, action:"closed",
+      actor_profile_id: ME.id, actor_username: ME.username,
+      description: ME.username + " closed out trip to " + (t?t.destination:"")
+    });
     status.className="status ok"; status.textContent="✅ Trip closed out.";
     await loadClosureQueue();
     setTimeout(()=>{ document.getElementById("closureFormPanel").classList.add("hidden"); }, 700);

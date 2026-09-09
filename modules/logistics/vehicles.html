@@ -66,6 +66,7 @@
           <select id="v_status"><option>Active</option><option>Under Maintenance</option><option>Unavailable</option><option>Disposed</option></select>
         </div>
       </div>
+      <div><label>Expected Fuel Consumption (km/litre)</label><input type="number" step="0.01" id="v_expected_consumption" placeholder="Leave blank until known — used by Fuel Management to flag abnormal usage"></div>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Assigned Driver is shown automatically once a Driver profile is linked to this vehicle — set from the Driver Profiles page.</p>
 
       <div class="sec-title">Insurance</div>
@@ -193,7 +194,7 @@ function toggleForm(isEdit){
 function clearForm(){
   document.getElementById("formTitle").textContent = "Add Vehicle";
   document.getElementById("v_id").value = "";
-  ["v_reg","v_chassis","v_year","v_make","v_model","v_dept","v_mileage","v_ins_provider","v_ins_policy","v_ins_expiry",
+  ["v_reg","v_chassis","v_year","v_make","v_model","v_dept","v_mileage","v_expected_consumption","v_ins_provider","v_ins_policy","v_ins_expiry",
    "v_road_no","v_road_expiry","v_lic_no","v_lic_expiry","v_purchase_date","v_purchase_value"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("v_status").value = "Active";
   ["v_ins_url","v_road_url","v_lic_url","v_purchase_url"].forEach(id=>{ document.getElementById(id).textContent=""; document.getElementById(id).classList.add("hidden"); });
@@ -213,6 +214,7 @@ function editVehicle(id){
   document.getElementById("v_model").value = v.model||"";
   document.getElementById("v_dept").value = v.department_location||"";
   document.getElementById("v_mileage").value = v.current_mileage??"";
+  document.getElementById("v_expected_consumption").value = v.expected_consumption_km_per_litre??"";
   document.getElementById("v_status").value = v.operational_status||"Active";
   document.getElementById("v_ins_provider").value = v.insurance_provider||"";
   document.getElementById("v_ins_policy").value = v.insurance_policy_no||"";
@@ -274,6 +276,7 @@ async function saveVehicle(){
       make, model, year: Number(year),
       department_location: document.getElementById("v_dept").value.trim() || null,
       current_mileage: document.getElementById("v_mileage").value ? Number(document.getElementById("v_mileage").value) : null,
+      expected_consumption_km_per_litre: document.getElementById("v_expected_consumption").value ? Number(document.getElementById("v_expected_consumption").value) : null,
       operational_status: document.getElementById("v_status").value,
       insurance_provider: document.getElementById("v_ins_provider").value.trim() || null,
       insurance_policy_no: document.getElementById("v_ins_policy").value.trim() || null,
@@ -304,10 +307,20 @@ async function saveVehicle(){
     if(id){
       const { error } = await sb.from("logistics_vehicles").update(payload).eq("id", id);
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"vehicle", entity_id:id, action:"updated",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " updated vehicle " + reg
+      });
     } else {
       payload.created_by = ME.id;
-      const { error } = await sb.from("logistics_vehicles").insert(payload);
+      const { data: inserted, error } = await sb.from("logistics_vehicles").insert(payload).select("id").single();
       if(error) throw error;
+      await sb.from("logistics_activity_log").insert({
+        entity_type:"vehicle", entity_id:inserted.id, action:"created",
+        actor_profile_id: ME.id, actor_username: ME.username,
+        description: ME.username + " added vehicle " + reg
+      });
     }
 
     if(warnings.length){

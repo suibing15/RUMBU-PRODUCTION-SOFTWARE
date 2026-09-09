@@ -129,6 +129,12 @@ async function decide(tripId, decision, note){
       await sb.from("logistics_trips").update({ status:"approved" }).eq("id", tripId);
     }
 
+    await sb.from("logistics_activity_log").insert({
+      entity_type:"trip", entity_id:tripId, action:"trip_"+decision,
+      actor_profile_id: ME.id, actor_username: ME.username,
+      description: ME.username + " " + decision + " trip request to " + (t?t.destination:"") + (note?(" — "+note):"")
+    });
+
     await loadQueue();
   }catch(e){
     alert("❌ " + e.message);

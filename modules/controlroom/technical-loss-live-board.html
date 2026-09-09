@@ -102,30 +102,24 @@ async function init(){
   try{
     const { shift, dateStr } = currentShiftAndDate();
 
-    // date_col is NULL or corrupt on most records — cannot use it for filtering.
-    // Use mc_stoppage_time instead (always populated with correct UTC timestamp).
-    // Fetch records where mc_stoppage_time >= yesterday to cover the current
-    // and previous shift window. Filter date and shift client-side using WAT offset.
-    const yesterday = (function(){
-      const d = new Date(watNow()); d.setDate(d.getDate()-1);
-      return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    })();
-    const trackingQ = "&mc_stoppage_time=gte." + yesterday + "T00:00:00";
-
+    // date_col is NULL/corrupt and mc_stoppage_time is TEXT (not TIMESTAMP),
+    // so server-side date filters are unreliable. Instead fetch the latest
+    // 1000 rows by id DESC — these are the most recently inserted records —
+    // and filter entirely client-side using watDateFromStoppage().
     const [trackingRows, treatedRes] = await Promise.all([
-      fetchAllRows("tracking_table", trackingQ),
-      fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number", { headers: authHeaders() })
+      fetch(SUPABASE_URL + "/rest/v1/tracking_table?select=*&order=id.desc&limit=1000",
+        { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch(SUPABASE_URL + "/rest/v1/treated_table?select=id_number",
+        { headers: authHeaders() })
     ]);
 
-    MON_ROWS = trackingRows;
+    MON_ROWS = Array.isArray(trackingRows) ? trackingRows : [];
 
     if(treatedRes.ok){
       const treatedRows = await treatedRes.json();
-      // tracking_table.asset_id → treated_table.id_number
       TREATED_IDS = new Set(treatedRows.map(r=>String(r.id_number)));
     }
 
-    // Count Technical Loss rows for the current shift using WAT date from mc_stoppage_time
     const techLossCount = MON_ROWS.filter(r=>
       watDateFromStoppage(r.mc_stoppage_time) === dateStr &&
       (r.job_code||"").trim().toLowerCase() === "technical loss" &&

@@ -235,14 +235,21 @@ function setAttachmentDisplay(elId, url){
   else { el.textContent = ""; el.classList.add("hidden"); }
 }
 
+// Never throws — a failed attachment upload must not block saving the
+// vehicle's mandatory data. Returns { url, warning } instead; the caller
+// decides what to do with a warning (show it, but still save).
 async function uploadIfPresent(fileInputId, existingUrl, folder){
   const file = document.getElementById(fileInputId).files[0];
-  if(!file) return existingUrl || null;
-  const path = folder + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
-  const { error } = await sb.storage.from("logistics-attachments").upload(path, file, { upsert:true });
-  if(error) throw new Error("Upload failed (" + fileInputId + "): " + error.message);
-  const { data } = sb.storage.from("logistics-attachments").getPublicUrl(path);
-  return data.publicUrl;
+  if(!file) return { url: existingUrl || null, warning: null };
+  try{
+    const path = folder + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+    const { error } = await sb.storage.from("logistics-attachments").upload(path, file, { upsert:true });
+    if(error) throw error;
+    const { data } = sb.storage.from("logistics-attachments").getPublicUrl(path);
+    return { url: data.publicUrl, warning: null };
+  }catch(e){
+    return { url: existingUrl || null, warning: fileInputId + ": " + e.message };
+  }
 }
 
 async function saveVehicle(){
@@ -279,10 +286,20 @@ async function saveVehicle(){
       purchase_value: document.getElementById("v_purchase_value").value ? Number(document.getElementById("v_purchase_value").value) : null,
     };
 
-    payload.insurance_attachment = await uploadIfPresent("v_ins_file", existing?.insurance_attachment, "insurance");
-    payload.roadworthiness_attachment = await uploadIfPresent("v_road_file", existing?.roadworthiness_attachment, "roadworthiness");
-    payload.vehicle_licence_attachment = await uploadIfPresent("v_lic_file", existing?.vehicle_licence_attachment, "licence");
-    payload.purchase_attachment = await uploadIfPresent("v_purchase_file", existing?.purchase_attachment, "purchase");
+    payload.insurance_attachment = null;
+    payload.roadworthiness_attachment = null;
+    payload.vehicle_licence_attachment = null;
+    payload.purchase_attachment = null;
+    const warnings = [];
+
+    const ins = await uploadIfPresent("v_ins_file", existing?.insurance_attachment, "insurance");
+    payload.insurance_attachment = ins.url; if(ins.warning) warnings.push(ins.warning);
+    const road = await uploadIfPresent("v_road_file", existing?.roadworthiness_attachment, "roadworthiness");
+    payload.roadworthiness_attachment = road.url; if(road.warning) warnings.push(road.warning);
+    const lic = await uploadIfPresent("v_lic_file", existing?.vehicle_licence_attachment, "licence");
+    payload.vehicle_licence_attachment = lic.url; if(lic.warning) warnings.push(lic.warning);
+    const purch = await uploadIfPresent("v_purchase_file", existing?.purchase_attachment, "purchase");
+    payload.purchase_attachment = purch.url; if(purch.warning) warnings.push(purch.warning);
 
     if(id){
       const { error } = await sb.from("logistics_vehicles").update(payload).eq("id", id);
@@ -293,9 +310,13 @@ async function saveVehicle(){
       if(error) throw error;
     }
 
-    status.className="status ok"; status.textContent="✅ Vehicle saved.";
+    if(warnings.length){
+      status.className="status warn"; status.textContent="⚠️ Vehicle saved, but " + warnings.length + " attachment(s) failed to upload: " + warnings.join("; ");
+    } else {
+      status.className="status ok"; status.textContent="✅ Vehicle saved.";
+    }
     await loadAll();
-    setTimeout(()=>{ document.getElementById("formPanel").classList.add("hidden"); }, 700);
+    if(!warnings.length) setTimeout(()=>{ document.getElementById("formPanel").classList.add("hidden"); }, 700);
   }catch(e){
     status.className="status err";
     status.textContent = (e.message && e.message.toLowerCase().indexOf("duplicate")!==-1)

@@ -12,6 +12,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../auth.js"></script>
 <script src="review-modal.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   body{padding:18px;}
   .wrap{max-width:1000px;margin:0 auto;}
@@ -80,6 +82,7 @@
         </select>
       </div>
     </div>
+    <div style="margin-top:10px;"><button class="btn-ghost" onclick="downloadPdf()">⬇ Download PDF (current filters)</button></div>
     <div id="wrap" style="margin-top:14px;overflow-x:auto;"></div>
   </div>
 </div>
@@ -89,6 +92,7 @@ let ME = null;
 let TRIPS = [];
 let VEHICLES = [];
 let DRIVERS = [];
+let CURRENT_ROWS = [];
 
 async function init(){
   const status = document.getElementById("connStatus");
@@ -140,6 +144,7 @@ function render(){
     return true;
   });
   const wrap = document.getElementById("wrap");
+  CURRENT_ROWS = rows;
   if(!rows.length){ wrap.innerHTML = "<p style='color:var(--muted);font-size:13px;'>No trip requests match.</p>"; return; }
   wrap.innerHTML = `<table>
     <thead><tr><th>Date</th><th>Department</th><th>Destination</th><th>Vehicle</th><th>Driver</th><th>Status</th></tr></thead>
@@ -243,6 +248,56 @@ async function proceedWithTripSubmit(){
   }catch(e){
     status.className="status err"; status.textContent="❌ " + e.message;
   }
+}
+
+function downloadPdf(){
+  if(!CURRENT_ROWS.length){ alert("Nothing to export — no rows match the current filters."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const navy = [31, 56, 100];
+
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.rect(0, 0, doc.internal.pageSize.getWidth(), 56, "F");
+  doc.setTextColor(255,255,255);
+  doc.setFont("helvetica","bold"); doc.setFontSize(13);
+  doc.text("RUMBU INDUSTRIES GROUP", 30, 24);
+  doc.setFont("helvetica","normal"); doc.setFontSize(10);
+  doc.text("Logistics — Trip Request Report", 30, 40);
+  doc.text("Printed " + new Date().toLocaleString("en-GB"), doc.internal.pageSize.getWidth()-30, 24, { align: "right" });
+
+  doc.setTextColor(60,60,60); doc.setFontSize(9);
+  const search = document.getElementById("search").value || "—";
+  const statusF = document.getElementById("statusFilter").value ? (STATUS_LABELS[document.getElementById("statusFilter").value]||"") : "All";
+  doc.text(`Search: ${search}   |   Status: ${statusF}   |   ${CURRENT_ROWS.length} record(s)`, 30, 72);
+
+  const body = CURRENT_ROWS.map(t=>{
+    const veh = t.logistics_vehicles ? t.logistics_vehicles.registration_number : "—";
+    const drv = (t.logistics_drivers && t.logistics_drivers.employees) ? t.logistics_drivers.employees.full_name : "—";
+    return [
+      t.trip_date||"—", t.requesting_department||"—", t.destination||"—", t.purpose||"—",
+      t.expected_duration_hours!=null?t.expected_duration_hours+"h":"—",
+      veh, drv, STATUS_LABELS[t.status]||t.status||"—"
+    ];
+  });
+
+  doc.autoTable({
+    startY: 84,
+    head: [["Date","Department","Destination","Purpose","Duration","Vehicle","Driver","Status"]],
+    body,
+    styles: { fontSize: 7.5, cellPadding: 4 },
+    headStyles: { fillColor: navy, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [240, 244, 249] },
+    margin: { left: 30, right: 30 },
+    didDrawPage: function(){
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFontSize(8); doc.setTextColor(120,120,120);
+      doc.text("CONFIDENTIAL", 30, doc.internal.pageSize.getHeight()-16);
+      doc.text("Page " + doc.internal.getCurrentPageInfo().pageNumber + " of " + pageCount,
+        doc.internal.pageSize.getWidth()-30, doc.internal.pageSize.getHeight()-16, { align: "right" });
+    }
+  });
+
+  doc.save("Logistics_Trip_Requests_" + new Date().toISOString().slice(0,10) + ".pdf");
 }
 
 init();

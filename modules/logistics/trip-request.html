@@ -38,7 +38,7 @@
 
   <div class="card-panel">
     <h3 style="color:var(--heading);margin:0 0 4px;">Trip Request</h3>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Request a vehicle and driver for a trip. Goes to the Logistics approval queue once submitted.</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 16px;">Request a vehicle and driver for a trip — goes straight to the Dispatch queue once submitted.</p>
 
     <button onclick="toggleForm()">+ New Trip Request</button>
 
@@ -53,7 +53,7 @@
       <div><label>Purpose of Trip *</label><textarea id="t_purpose"></textarea></div>
       <div class="form-row">
         <div><label>Trip Date *</label><input type="date" id="t_date"></div>
-        <div><label>Expected Duration (days) *</label><input type="number" step="0.5" min="0" id="t_duration"></div>
+        <div><label>Expected Duration (hours) *</label><input type="number" step="0.5" min="0" id="t_duration"></div>
       </div>
 
       <div class="sec-title">Vehicle &amp; Driver</div>
@@ -75,8 +75,8 @@
       <div><label>Search</label><input id="search" placeholder="Department, destination, purpose" oninput="render()"></div>
       <div><label>Status</label>
         <select id="statusFilter" onchange="render()">
-          <option value="">All</option><option value="submitted">Submitted</option><option value="approved">Approved</option>
-          <option value="rejected">Rejected</option><option value="dispatched">Dispatched</option><option value="completed">Completed</option>
+          <option value="">All</option><option value="submitted">Submitted (awaiting dispatch)</option>
+          <option value="dispatched">Dispatched</option><option value="completed">Completed</option>
         </select>
       </div>
     </div>
@@ -89,7 +89,6 @@ let ME = null;
 let TRIPS = [];
 let VEHICLES = [];
 let DRIVERS = [];
-let CURRENT_TRIP = null; // set when correcting a rejected request
 
 async function init(){
   const status = document.getElementById("connStatus");
@@ -129,8 +128,8 @@ function onVehicleChange(){
   note.textContent = (st && st !== "Active") ? "⚠️ This vehicle's current status is \"" + st + "\" — confirm it's actually available before requesting it." : "";
 }
 
-const STATUS_LABELS = { submitted:"Submitted", approved:"Approved", rejected:"Rejected", dispatched:"Dispatched", completed:"Completed" };
-const STATUS_BADGE = { submitted:"b-submitted", approved:"b-approved", rejected:"b-rejected", dispatched:"b-dispatched", completed:"b-completed" };
+const STATUS_LABELS = { submitted:"Submitted", dispatched:"Dispatched", completed:"Completed" };
+const STATUS_BADGE = { submitted:"b-submitted", dispatched:"b-dispatched", completed:"b-completed" };
 
 function render(){
   const q = document.getElementById("search").value.trim().toLowerCase();
@@ -143,29 +142,26 @@ function render(){
   const wrap = document.getElementById("wrap");
   if(!rows.length){ wrap.innerHTML = "<p style='color:var(--muted);font-size:13px;'>No trip requests match.</p>"; return; }
   wrap.innerHTML = `<table>
-    <thead><tr><th>Date</th><th>Department</th><th>Destination</th><th>Vehicle</th><th>Driver</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Date</th><th>Department</th><th>Destination</th><th>Vehicle</th><th>Driver</th><th>Status</th></tr></thead>
     <tbody>${rows.map(t=>{
       const veh = t.logistics_vehicles ? t.logistics_vehicles.registration_number : "—";
       const drv = (t.logistics_drivers && t.logistics_drivers.employees) ? t.logistics_drivers.employees.full_name : "—";
-      const canEdit = t.status === "rejected" && t.requested_by === ME.id;
       return `<tr>
         <td>${t.trip_date||"—"}</td><td>${t.requesting_department||"—"}</td><td>${t.destination||"—"}</td>
         <td>${veh}</td><td>${drv}</td>
         <td><span class="badge ${STATUS_BADGE[t.status]||''}">${STATUS_LABELS[t.status]||t.status}</span></td>
-        <td>${canEdit ? `<button class="btn-ghost btn-sm" onclick="editTrip(${t.id})">Correct &amp; Resubmit</button>` : ""}</td>
       </tr>`;
     }).join("")}</tbody>
   </table>`;
 }
 
-function toggleForm(isEdit){
+function toggleForm(){
   const panel = document.getElementById("formPanel");
   panel.classList.toggle("hidden");
-  if(!panel.classList.contains("hidden") && !isEdit) clearForm();
+  if(!panel.classList.contains("hidden")) clearForm();
 }
 
 function clearForm(){
-  CURRENT_TRIP = null;
   document.getElementById("formTitle").textContent = "New Trip Request";
   document.getElementById("t_id").value = "";
   ["t_dept","t_destination","t_purpose","t_date","t_duration"].forEach(id=>document.getElementById(id).value="");
@@ -173,28 +169,6 @@ function clearForm(){
   document.getElementById("t_driver").value = "";
   document.getElementById("vehicleStatusNote").textContent = "";
   document.getElementById("t_file_url").classList.add("hidden");
-  document.getElementById("formStatus").textContent = "";
-}
-
-function editTrip(id){
-  const t = TRIPS.find(x=>x.id===id);
-  if(!t) return;
-  CURRENT_TRIP = t;
-  document.getElementById("formPanel").classList.remove("hidden");
-  document.getElementById("formTitle").textContent = "Correct Trip Request";
-  document.getElementById("t_id").value = t.id;
-  document.getElementById("t_dept").value = t.requesting_department||"";
-  document.getElementById("t_destination").value = t.destination||"";
-  document.getElementById("t_purpose").value = t.purpose||"";
-  document.getElementById("t_date").value = t.trip_date||"";
-  document.getElementById("t_duration").value = t.expected_duration_days??"";
-  document.getElementById("t_vehicle").value = t.vehicle_id||"";
-  document.getElementById("t_driver").value = t.driver_id||"";
-  if(t.supporting_document){
-    const el = document.getElementById("t_file_url");
-    el.innerHTML = `<a href="${t.supporting_document}" target="_blank">View current file</a>`;
-    el.classList.remove("hidden");
-  }
   document.getElementById("formStatus").textContent = "";
 }
 
@@ -220,7 +194,7 @@ function submitTrip(){
       ["Destination", document.getElementById("t_destination").value],
       ["Purpose", document.getElementById("t_purpose").value],
       ["Trip Date", document.getElementById("t_date").value],
-      ["Expected Duration (days)", document.getElementById("t_duration").value],
+      ["Expected Duration (hours)", document.getElementById("t_duration").value],
       ["Vehicle", vehSel.options[vehSel.selectedIndex]?.text||""],
       ["Driver", drvSel.options[drvSel.selectedIndex]?.text||""],
     ]}],
@@ -238,10 +212,12 @@ async function proceedWithTripSubmit(){
       destination: document.getElementById("t_destination").value.trim(),
       purpose: document.getElementById("t_purpose").value.trim(),
       trip_date: document.getElementById("t_date").value,
-      expected_duration_days: Number(document.getElementById("t_duration").value),
+      expected_duration_hours: Number(document.getElementById("t_duration").value),
       vehicle_id: Number(document.getElementById("t_vehicle").value),
       driver_id: Number(document.getElementById("t_driver").value),
-      status: "submitted"
+      status: "submitted",
+      cycle: 1,
+      requested_by: ME.id
     };
 
     const file = document.getElementById("t_file").files[0];
@@ -250,34 +226,18 @@ async function proceedWithTripSubmit(){
       const { error: upErr } = await sb.storage.from("logistics-attachments").upload(path, file);
       if(upErr){ status.className="status warn"; status.textContent="⚠️ Attachment failed to upload, continuing without it: " + upErr.message; }
       else { const { data } = sb.storage.from("logistics-attachments").getPublicUrl(path); payload.supporting_document = data.publicUrl; }
-    } else if(CURRENT_TRIP){
-      payload.supporting_document = CURRENT_TRIP.supporting_document;
     }
 
-    if(CURRENT_TRIP){
-      payload.cycle = (CURRENT_TRIP.cycle||1) + 1;
-      const { error } = await sb.from("logistics_trips").update(payload).eq("id", CURRENT_TRIP.id);
-      if(error) throw error;
-      await sb.from("logistics_activity_log").insert({
-        entity_type:"trip", entity_id:CURRENT_TRIP.id, action:"resubmitted",
-        actor_profile_id: ME.id, actor_username: ME.username,
-        description: ME.username + " resubmitted trip request to " + payload.destination
-      });
-    } else {
-      payload.cycle = 1;
-      payload.requested_by = ME.id;
-      const { data: inserted, error } = await sb.from("logistics_trips").insert(payload).select("id").single();
-      if(error) throw error;
-      await sb.from("logistics_activity_log").insert({
-        entity_type:"trip", entity_id:inserted.id, action:"submitted",
-        actor_profile_id: ME.id, actor_username: ME.username,
-        description: ME.username + " submitted a trip request to " + payload.destination
-      });
-    }
+    const { data: inserted, error } = await sb.from("logistics_trips").insert(payload).select("id").single();
+    if(error) throw error;
+    await sb.from("logistics_activity_log").insert({
+      entity_type:"trip", entity_id:inserted.id, action:"submitted",
+      actor_profile_id: ME.id, actor_username: ME.username,
+      description: ME.username + " submitted a trip request to " + payload.destination
+    });
 
     if(status.className !== "status warn") status.className="status ok";
-    status.textContent = (status.className==="status warn" ? status.textContent : "✅ Trip request submitted for approval.");
-    CURRENT_TRIP = null;
+    status.textContent = (status.className==="status warn" ? status.textContent : "✅ Trip request submitted — ready for Dispatch.");
     await loadAll();
     setTimeout(()=>{ document.getElementById("formPanel").classList.add("hidden"); }, 900);
   }catch(e){

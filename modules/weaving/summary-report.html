@@ -191,6 +191,41 @@ tr:nth-child(even){background:#f2f2f2;}
 </div>
 
 <script>
+const WEAVING_ASSETS = new Set([
+  'WA-01','WA-02','WA-03','WA-04','WA-05','WA-06','WA-07','WA-08','WA-09','WA-10','WA-11','WA-12',
+  'WB-01','WB-02','WB-03','WB-04','WB-05','WB-06','WB-07','WB-08','WB-09','WB-10','WB-11','WB-12',
+  'WC-01','WC-02','WC-03','WC-04','WC-05','WC-06','WC-07','WC-08','WC-09','WC-10','WC-11','WC-12',
+  'WD-01','WD-02','WD-03','WD-04','WD-05','WD-06','WD-07','WD-08','WD-09','WD-10','WD-11','WD-12',
+  'WE-01','WE-02','WE-03','WE-04','WE-05','WE-06','WE-07','WE-08','WE-09','WE-10','WE-11','WE-12',
+  'WF-01','WF-02','WF-03','WF-04','WF-05','WF-06','WF-07','WF-08','WF-09','WF-10','WF-11','WF-12',
+  'WG-01','WG-02','WG-03','WG-04','WG-05','WG-06','WG-07','WG-08','WG-09','WG-10','WG-11','WG-12','WG-13','WG-14',
+  'WH-01','WH-02','WH-03','WH-04','WH-05','WH-06','WH-07','WH-08','WH-09','WH-10','WH-11','WH-12',
+  'WI-01','WI-02','WI-03','WI-04','WI-05','WI-06','WI-07','WI-08','WI-09','WI-10','WI-11','WI-12',
+  'WJ-01','WJ-02','WJ-03','WJ-04','WJ-05','WJ-06','WJ-07','WJ-08','WJ-09','WJ-10','WJ-11','WJ-12',
+  'WK-01','WK-02','WK-03','WK-04','WK-05','WK-06','WK-07','WK-08','WK-09','WK-10','WK-11','WK-12',
+  'WL-01','WL-02','WL-03','WL-04','WL-05','WL-06','WL-07','WL-08','WL-09','WL-10','WL-11','WL-12',
+  'WM-01','WM-02','WM-03','WM-04','WM-05','WM-06','WM-07','WM-08','WM-09','WM-10','WM-11','WM-12',
+  'WN-01','WN-02','WN-03','WN-04','WN-05','WN-06','WN-07','WN-08','WN-09','WN-10','WN-11','WN-12',
+  'WO-01','WO-02','WO-03','WO-04','WO-05','WO-06','WO-07','WO-08','WO-09','WO-10','WO-11','WO-12',
+  'WP-01','WP-02','WP-03','WP-04','WP-05','WP-06','WP-07','WP-08','WP-09','WP-10','WP-11','WP-12',
+  'WQ-01','WQ-02','WQ-03','WQ-04','WQ-05','WQ-06','WQ-07','WQ-08','WQ-09','WQ-10','WQ-11','WQ-12',
+  'WR-01','WR-02','WR-03','WR-04','WR-05','WR-06','WR-07','WR-08','WR-09','WR-10','WR-11','WR-12',
+  'WS-01','WS-02','WS-03','WS-04','WS-05','WS-06','WS-07','WS-08','WS-09','WS-10','WS-11','WS-12',
+  'WS-13','WS-14','WS-15','WS-16','WS-17','WS-18','WS-19','WS-20','WS-21','WS-22','WS-23',
+  'WT-01','WT-02','WT-03','WT-04','WT-05','WT-06','WT-07','WT-08','WT-09','WT-10','WT-11','WT-12','WT-13',
+  'WU-01','WU-02','WU-03','WU-04','WU-05','WU-06','WU-07','WU-08','WU-09','WU-10','WU-11','WU-12',
+  'WU-13','WU-14','WU-15','WU-16','WU-17','WU-18','WU-19','WU-20','WU-21','WU-22',
+  'WV-01','WV-02','WV-03','WV-04','WV-05','WV-06','WV-07','WV-08','WV-09','WV-10','WV-11','WV-12',
+  'WV-13','WV-14','WV-15','WV-16','WV-17','WV-18','WV-19',
+  'WW-01','WW-02','WW-03','WW-04','WW-05','WW-06','WW-07','WW-08','WW-09','WW-10','WW-11','WW-12',
+  'WW-13','WW-14','WW-15','WW-16',
+  'WX-01','WX-02','WX-03','WX-04','WX-05','WX-06','WX-07','WX-08','WX-09','WX-10','WX-11','WX-12',
+  'WY-01','WY-02','WY-03','WY-04','WY-05','WY-06','WY-07','WY-08','WY-09','WY-10','WY-11','WY-12',
+  'WY-13','WY-14','WY-15','WY-16','WY-17',
+  'WZ-01','WZ-02','WZ-03','WZ-04','WZ-05','WZ-06','WZ-07','WZ-08','WZ-09','WZ-10','WZ-11','WZ-12',
+  'WZ-13','WZ-14','WZ-15','WZ-16','WZ-17','WZ-18'
+]);
+
 const SECTION_LABEL = { "Rumbu": "Rumbu", "MamaSannu": "Mama Sannu" };
 
 let MW_ROWS = [], CTRL_ROWS = [], COMPLAINTS_ROWS = [], EXCLUDED_JOB_CODES = new Set(); CTRL_ROWS.forEach(normalizeControlRow);
@@ -326,6 +361,7 @@ async function generate(){
     if(f.shift !== "All" && r.shift !== f.shift) return;
     if(f.section !== "All" && r.section !== f.section) return;
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return;
+    if(!WEAVING_ASSETS.has(r.assets)) return; // matches GAS buildAssetInClause() whitelist
     const stop = parseDT(r.stop_time), finish = parseDT(r.finish_time);
     if(!stop || !finish) return;
     const key = r.unit + "||" + r.date_col;
@@ -346,9 +382,10 @@ async function generate(){
   const byType = {};
   prod.forEach(r=>{
     const type = r.mat_type || "(blank)";
-    if(!byType[type]) byType[type] = { type, assets:0, A:0, B:0, C:0, total:0, target:0, downtime:0, mld:0 };
+    if(!byType[type]) byType[type] = { type, assetsSet: new Set(), assets:0, A:0, B:0, C:0, total:0, target:0, downtime:0, mld:0 };
     const t = byType[type];
-    t.assets += 1;
+    t.assetsSet.add(r.assets); // count unique assets per type (matches GAS COUNT(p.Assets))
+    t.assets = t.assetsSet.size;
     t.A += Number(r.a_double||0) + Number(r.a_single||0);
     t.B += Number(r.b||0);
     t.C += Number(r.c||0);
@@ -384,6 +421,7 @@ async function generate(){
     if(f.shift !== "All" && r.shift !== f.shift) return;
     if(f.section !== "All" && r.section !== f.section) return;
     if(EXCLUDED_JOB_CODES.has(r.job_code)) return;
+    if(!WEAVING_ASSETS.has(r.assets)) return; // matches GAS getDepartmentDowntimeSummary whitelist
     const stop = parseDT(r.stop_time), finish = parseDT(r.finish_time);
     if(!stop || !finish) return;
     const key = r.department || "(blank)";
@@ -443,6 +481,7 @@ async function generate(){
     const actualEffT = ATG ? Math.round((t.total/ATG)*100) : 0;
     html += `<div style="margin-bottom:16px;">
       <h3>Production By Type: ${t.type}</h3>
+      <p>Assets Used = ${t.assets}</p>
       <p>Our A Grade Production = ${Math.round(t.A)}</p>
       <p>Our B Grade Production = ${Math.round(t.B)}</p>
       <p>Our C Grade Production = ${Math.round(t.C)}</p>

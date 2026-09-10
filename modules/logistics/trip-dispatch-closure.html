@@ -77,7 +77,7 @@
       <div><label>Fuel Issued (litres)</label><input type="text" id="clos_fuel_issued" readonly></div>
       <div><label>Trip Expenses (NGN) *</label><input type="number" step="0.01" id="clos_expenses"></div>
     </div>
-    <p style="font-size:12px;color:var(--muted);margin:4px 0 0;">Prefilled as Fuel Issued &times; Current Fuel Price — adjust if the actual cost differed.</p>
+    <p style="font-size:12px;color:var(--muted);margin:4px 0 0;" id="clos_price_note"></p>
 
     <button onclick="submitClosure()" style="margin-top:10px;">Confirm Closure</button>
     <button class="btn-ghost" onclick="document.getElementById('closureFormPanel').classList.add('hidden');">Cancel</button>
@@ -269,7 +269,7 @@ function onReturnStatusChange(){
   wrap.classList.toggle("hidden", document.getElementById("clos_return_status").value !== "other");
 }
 
-function openClosureForm(tripId){
+async function openClosureForm(tripId){
   const t = CLOSURE_DATA.find(x=>x.id===tripId);
   if(!t) return;
   document.getElementById("closureFormPanel").classList.remove("hidden");
@@ -279,10 +279,32 @@ function openClosureForm(tripId){
   document.getElementById("clos_detail").value = "";
   document.getElementById("clos_detail_wrap").classList.add("hidden");
   document.getElementById("clos_fuel_issued").value = t.calculated_fuel_litres!=null ? t.calculated_fuel_litres.toFixed(2) + " L" : "—";
-  document.getElementById("clos_expenses").value = (t.calculated_fuel_litres!=null && CURRENT_PRICE!=null)
-    ? (t.calculated_fuel_litres * CURRENT_PRICE).toFixed(2) : "";
+  document.getElementById("clos_expenses").value = "";
   document.getElementById("closureFormStatus").textContent = "";
   document.getElementById("closureFormPanel").scrollIntoView({behavior:"smooth"});
+
+  // Trip Expenses = litres this trip actually needed × the ACTUAL price
+  // this vehicle's fuel was bought at (its most recent real purchase in
+  // Fuel Management) — not the generic Current Price, since that's just
+  // an estimate. Only falls back to Current Price if this vehicle has no
+  // purchase history yet at all.
+  const priceNote = document.getElementById("clos_price_note");
+  if(t.calculated_fuel_litres==null){ priceNote.textContent = ""; return; }
+
+  const { data: lastPurchase } = await sb.from("logistics_fuel_records")
+    .select("price_per_litre,fuelled_at").eq("vehicle_id", t.vehicle_id)
+    .order("fuelled_at",{ascending:false}).limit(1).maybeSingle();
+
+  if(lastPurchase){
+    const cost = t.calculated_fuel_litres * lastPurchase.price_per_litre;
+    document.getElementById("clos_expenses").value = cost.toFixed(2);
+    priceNote.textContent = "Based on this vehicle's last actual fuel purchase: ₦" + lastPurchase.price_per_litre + "/litre on " + new Date(lastPurchase.fuelled_at).toLocaleDateString("en-GB") + ".";
+  } else if(CURRENT_PRICE!=null){
+    document.getElementById("clos_expenses").value = (t.calculated_fuel_litres * CURRENT_PRICE).toFixed(2);
+    priceNote.textContent = "No fuel purchase on record yet for this vehicle — using the general Current Fuel Price (₦" + CURRENT_PRICE + "/litre) instead.";
+  } else {
+    priceNote.textContent = "⚠️ No fuel purchase on record for this vehicle, and no Current Fuel Price set — enter Trip Expenses manually.";
+  }
 }
 
 function submitClosure(){

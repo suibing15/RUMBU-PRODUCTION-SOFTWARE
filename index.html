@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rumbu Production System</title>
+<title>RumbuApp</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1F3864">
 <link rel="icon" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Rumbu">
+<meta name="apple-mobile-web-app-title" content="RumbuApp">
 <link rel="stylesheet" href="styles.css">
 <script>
   if ("serviceWorker" in navigator) {
@@ -62,20 +62,20 @@
 <div class="overlay" id="overlay" onclick="closeDrawer()"></div>
 
 <!-- Side flyout submenu: a module's pages slide out beside the sidebar -->
-<div class="side-flyout" id="sideFlyout"></div>
+<div class="side-flyout" id="sideFlyout" onmouseenter="cancelHoverClose()" onmouseleave="scheduleHoverClose()"></div>
 
 <div class="app" id="appShell">
 
 <!-- SIDEBAR -->
-<nav class="sidebar" id="side">
+<nav class="sidebar" id="side" onmouseleave="scheduleHoverClose()">
   <div class="side-brand">
     <div class="logo">S</div>
-    <div class="b-text"><b>SOFTWARE NAME</b><span>RUMBU INDUSTRIES GROUP</span></div>
+    <div class="b-text"><b>RumbuApp</b><span>RUMBU INDUSTRIES GROUP</span></div>
     <button class="side-close" onclick="closeDrawer()" aria-label="Close menu">&times;</button>
   </div>
   <div class="side-scroll">
 
-  <button class="menu-flat" data-group-name="Manage Accounts" onclick="openAccountPicker(event)">
+  <button class="menu-flat" data-group-name="Manage Accounts" onclick="openAccountPicker(event)" onmouseenter="hoverOpenAccountPicker(event)">
     <span class="m-label"><span class="m-icon" id="iconAccount"></span><span>MANAGE ACCOUNTS</span></span><span class="chev">&rsaquo;</span>
   </button>
 
@@ -90,7 +90,7 @@
   <header class="app-header">
     <button class="hamburger" onclick="openDrawer()" aria-label="Open menu">&#9776;</button>
     <div class="titles">
-      <h1>SOFTWARE NAME</h1>
+      <h1>RumbuApp</h1>
       <p>RUMBU INDUSTRIES GROUP</p>
     </div>
     <div class="theme-toggle" id="themeToggle">
@@ -267,7 +267,7 @@
         if(!modPages.length) return; // skip empty module categories
         MODULE_PAGES_BY_MODULE[m.name] = modPages;
         const safeName = m.name.replace(/'/g,"\\'");
-        html += `<button class="menu-flat" data-group-name="${m.name.replace(/"/g,"&quot;")}" onclick="openPagePicker('${safeName}', event)">` +
+        html += `<button class="menu-flat" data-group-name="${m.name.replace(/"/g,"&quot;")}" onclick="openPagePicker('${safeName}', event)" onmouseenter="hoverOpenModule('${safeName}', event)">` +
           `<span class="m-label"><span class="m-icon">${iconSvgFor(m.name)}</span><span>${m.name.toUpperCase()}</span></span><span class="chev">&rsaquo;</span></button>`;
       });
 
@@ -308,6 +308,31 @@
   // second click on the same module (or clicking away) closes it.
   function openPagePicker(moduleName, ev){ openSideMenu("module", moduleName, ev); }
   function openAccountPicker(ev){ openSideMenu("account", "Manage Accounts", ev); }
+
+  // ---- Hover-to-reveal: placing the cursor on a module opens its page
+  // list immediately, no click needed. Click still works exactly as
+  // before (mainly for touch devices, where hover doesn't apply). A
+  // short close delay, cancelled on re-entering either the sidebar or
+  // the flyout, stops it from closing while the cursor is briefly
+  // between the two during the diagonal mouse movement.
+  let hoverCloseTimer = null;
+  function cancelHoverClose(){ if(hoverCloseTimer){ clearTimeout(hoverCloseTimer); hoverCloseTimer = null; } }
+  function scheduleHoverClose(){ cancelHoverClose(); hoverCloseTimer = setTimeout(hideFlyout, 250); }
+
+  function hoverOpenModule(moduleName, ev){ hoverOpenSideMenu("module", moduleName, ev); }
+  function hoverOpenAccountPicker(ev){ hoverOpenSideMenu("account", "Manage Accounts", ev); }
+
+  function hoverOpenSideMenu(kind, name, ev){
+    cancelHoverClose();
+    const anchor = ev && (ev.currentTarget || ev.target) ? (ev.currentTarget || ev.target).closest(".menu-flat") : null;
+    const fly = document.getElementById("sideFlyout");
+    CURRENT_PICKER = { kind, name };
+    renderFlyout();
+    fly.classList.add("show");
+    if(anchor) positionFlyout(anchor);
+    document.querySelectorAll(".menu-flat.active").forEach(b=>b.classList.remove("active"));
+    if(anchor) anchor.classList.add("active");
+  }
 
   function openSideMenu(kind, name, ev){
     const anchor = ev && (ev.currentTarget || ev.target)

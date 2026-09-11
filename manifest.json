@@ -1,6 +1,6 @@
 {
-  "name": "Rumbu Industries Group",
-  "short_name": "Rumbu",
+  "name": "RumbuApp",
+  "short_name": "RumbuApp",
   "description": "Rumbu Industries Group — internal operations, production, logistics, and workforce management system.",
   "start_url": "/index.html",
   "scope": "/",

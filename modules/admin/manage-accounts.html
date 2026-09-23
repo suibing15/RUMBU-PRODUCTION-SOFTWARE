@@ -65,6 +65,10 @@
   .page-group .checks{padding:8px 10px;margin-top:0;}
   button{margin-top:14px;}
   button.danger{background:var(--bad);} button.ghost{background:var(--bg);color:var(--heading);border:1px solid var(--line-2);}
+  .pw-wrap{position:relative;}
+  .pw-wrap input{padding-right:58px;}
+  .pw-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:6px 8px;background:none;color:var(--accent-2);border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;}
+  .pw-toggle:hover{background:var(--bg);}
   table{margin-top:12px;}
   .badge{display:inline-block;background:var(--accent);color:var(--logo-fg);padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;}
   .search-result-row{padding:8px 10px;border:1px solid var(--line);border-radius:6px;margin-top:4px;cursor:pointer;background:var(--card);}
@@ -160,7 +164,7 @@
       <div class="status" id="new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
       <div class="form-row">
         <div class="field"><label>Email</label><input id="new_emp_email" type="email" placeholder="name@example.com"></div>
-        <div class="field"><label>Phone Number *</label><input id="new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
+        <div class="field"><label>Phone Number</label><input id="new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>Branch *</label>
@@ -330,7 +334,7 @@
     <div class="status" id="admin_new_emp_dup_warn" style="display:none;color:var(--warn);font-size:12.5px;margin:-6px 0 8px;"></div>
     <div class="form-row">
       <div class="field"><label>Email</label><input id="admin_new_emp_email" type="email" placeholder="name@example.com"></div>
-      <div class="field"><label>Phone Number *</label><input id="admin_new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
+      <div class="field"><label>Phone Number</label><input id="admin_new_emp_phone" type="tel" placeholder="e.g. 08012345678"></div>
     </div>
     <div class="form-row">
       <div class="field"><label>Branch *</label>
@@ -427,11 +431,11 @@
 <div class="details-body">
   <p class="sub">For your security, enter your current password before setting a new one.</p>
   <div class="form-row">
-    <div class="field"><label>Current Password</label><input id="current_password" type="password" autocomplete="current-password" placeholder="Your current password"></div>
+    <div class="field"><label>Current Password</label><div class="pw-wrap"><input id="current_password" type="password" autocomplete="current-password" placeholder="Your current password"><button type="button" class="pw-toggle" onclick="togglePasswordField('current_password', this)">Show</button></div></div>
   </div>
   <div class="form-row">
-    <div class="field"><label>New Password</label><input id="new_password" type="password" autocomplete="new-password" placeholder="New password (at least 6 characters)"></div>
-    <div class="field"><label>Confirm New Password</label><input id="confirm_password" type="password" autocomplete="new-password" placeholder="Repeat new password"></div>
+    <div class="field"><label>New Password</label><div class="pw-wrap"><input id="new_password" type="password" autocomplete="new-password" placeholder="New password (at least 6 characters)"><button type="button" class="pw-toggle" onclick="togglePasswordField('new_password', this)">Show</button></div></div>
+    <div class="field"><label>Confirm New Password</label><div class="pw-wrap"><input id="confirm_password" type="password" autocomplete="new-password" placeholder="Repeat new password"><button type="button" class="pw-toggle" onclick="togglePasswordField('confirm_password', this)">Show</button></div></div>
   </div>
   <button onclick="changeMyPassword()">UPDATE PASSWORD</button>
   <div class="status" id="pw_status"></div>
@@ -1887,7 +1891,6 @@ async function addEmployee(){
 
   if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
   if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
-  if(!phone){ status.className="status err"; status.textContent="Phone Number is required."; return; }
   if(email && !/^\S+@\S+\.\S+$/.test(email)){ status.className="status err"; status.textContent="Enter a valid email address, or leave it blank."; return; }
   if(!branch){ status.className="status err"; status.textContent="Select a Branch."; return; }
   if(!deptName){ status.className="status err"; status.textContent="Select a Department."; return; }
@@ -1950,7 +1953,6 @@ async function addEmployeeAsAdmin(){
 
   if(!employeeId){ status.className="status err"; status.textContent="Employee ID is required."; return; }
   if(!fullName){ status.className="status err"; status.textContent="Full Name is required."; return; }
-  if(!phone){ status.className="status err"; status.textContent="Phone Number is required."; return; }
   if(email && !/^\S+@\S+\.\S+$/.test(email)){ status.className="status err"; status.textContent="Enter a valid email address, or leave it blank."; return; }
   if(!branch || !(ME.sectionNames||[]).includes(branch)){
     status.className="status err"; status.textContent="Select one of your assigned Branch(es).";
@@ -2059,6 +2061,16 @@ function esc(s){
   return String(s)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// Shared show/hide toggle for any password-type field: swaps the input's
+// type between password and text and updates the button's own label.
+function togglePasswordField(inputId, btn){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  btn.textContent = showing ? "Show" : "Hide";
 }
 
 // The directory the current role actually uses.
